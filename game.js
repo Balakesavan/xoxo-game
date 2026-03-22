@@ -261,9 +261,11 @@ function renderGame(data) {
   $('p1-online').className = 'player-online ' + (player1?.online ? 'on' : 'off');
   $('p2-online').className = 'player-online ' + (player2?.online ? 'on' : 'off');
 
-  // Highlight active player
+  // Highlight active player border + turn arrow in VS column
   $('p1-panel').classList.toggle('active-player', turn === 'player1' && status === 'playing');
   $('p2-panel').classList.toggle('active-player', turn === 'player2' && status === 'playing');
+  const vsEl = document.querySelector('.score-vs');
+  if (vsEl) vsEl.textContent = status === 'playing' ? (turn === 'player1' ? '←' : '→') : 'VS';
 
   // YOU badge — always present for equal height; text set per player
   [['p1-panel','player1'],['p2-panel','player2']].forEach(([id, pid]) => {
