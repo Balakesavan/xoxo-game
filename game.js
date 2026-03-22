@@ -721,20 +721,18 @@ function listenToAvailableRooms() {
   const roomsRef = db.ref('rooms');
 
   roomsRef.on('value', snap => {
-    const data = snap.val();
+    const data = snap.val() || {};
     const list = $('rooms-list');
     const count = $('rooms-count');
 
     if (!list) return;
 
     const openRooms = [];
-    if (data) {
-      Object.entries(data).forEach(([id, room]) => {
-        if (room.status === 'waiting' && room.player1) {
-          openRooms.push({ id, host: room.player1.name });
-        }
-      });
-    }
+    Object.entries(data).forEach(([id, room]) => {
+      if (room && room.status === 'waiting' && room.player1 && room.player1.name) {
+        openRooms.push({ id, host: room.player1.name });
+      }
+    });
 
     if (openRooms.length === 0) {
       count.textContent = 'No open rooms';
