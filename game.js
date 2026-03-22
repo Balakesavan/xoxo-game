@@ -780,8 +780,25 @@ listenToAvailableRooms();
 let lobbyUserId   = null;   // unique key for this browser session
 let lobbyUserName = '';
 
+const CHAT_INACTIVE_MS = 30 * 60 * 1000; // 30 minutes
+
+async function clearChatIfInactive() {
+  const snap = await db.ref('lobby/lastActivity').once('value');
+  const last = snap.val();
+  if (!last) return; // no activity yet — nothing to clear
+  if (Date.now() - last >= CHAT_INACTIVE_MS) {
+    await db.ref('lobby/messages').remove();
+    await db.ref('lobby/lastActivity').remove();
+    const box = $('chat-messages');
+    if (box) box.innerHTML = '';
+  }
+}
+
 function initLobby() {
   lobbyUserId = db.ref('lobby/online').push().key; // generate unique ID
+
+  // Clear stale chat on load
+  clearChatIfInactive();
 
   // Listen to online users
   db.ref('lobby/online').on('value', snap => {
@@ -844,6 +861,7 @@ async function sendChat() {
     uid:  lobbyUserId,
     time: firebase.database.ServerValue.TIMESTAMP,
   });
+  await db.ref('lobby/lastActivity').set(firebase.database.ServerValue.TIMESTAMP);
 }
 
 function appendChatMessage(msg) {
