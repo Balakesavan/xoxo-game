@@ -377,21 +377,24 @@ input[type="text"]:focus {
 /* ─── Player Panels ─────────────────────────────────────────── */
 .players-row {
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  gap: 10px;
+  grid-template-columns: 1fr 56px 1fr;
+  align-items: stretch;
+  gap: 8px;
   width: 100%;
-  margin-bottom: 16px;
+  margin-bottom: 14px;
 }
 
 .player-panel {
+  flex: 1;
   background: var(--surface);
-  border: 1.5px solid var(--border);
+  border: 2px solid var(--border);
   border-radius: var(--radius);
-  padding: 14px 12px;
+  padding: 12px 10px 14px;
   text-align: center;
   transition: border-color var(--trans), box-shadow var(--trans);
   position: relative;
   overflow: hidden;
+  min-width: 0;
 }
 
 .player-panel::before {
@@ -400,29 +403,37 @@ input[type="text"]:focus {
   inset: 0;
   opacity: 0;
   transition: opacity var(--trans);
+  pointer-events: none;
 }
 
-#p1-panel::before { background: linear-gradient(135deg, rgba(244,91,106,0.12), transparent); }
-#p2-panel::before { background: linear-gradient(135deg, transparent, rgba(78,168,222,0.12)); }
+#p1-panel::before { background: linear-gradient(160deg, rgba(244,91,106,0.15), transparent 70%); }
+#p2-panel::before { background: linear-gradient(200deg, rgba(78,168,222,0.15), transparent 70%); }
 
-.player-panel.active-player { border-color: var(--accent-win); box-shadow: 0 0 16px rgba(240,192,48,0.2); }
+.player-panel.active-player {
+  border-color: var(--accent-win);
+  box-shadow: 0 0 18px rgba(240,192,48,0.18);
+}
 .player-panel.active-player::before { opacity: 1; }
 
-.player-panel.is-me::after {
-  content: 'YOU';
-  position: absolute;
-  top: 6px;
-  right: 8px;
+/* YOU badge — sits above the symbol, doesn't overlap */
+.you-badge {
+  display: inline-block;
   font-size: 9px;
   font-weight: 800;
-  letter-spacing: 1px;
+  letter-spacing: 1.5px;
   color: var(--text-dim);
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  margin-bottom: 4px;
 }
 
 .player-symbol {
-  font-size: 22px;
+  font-size: 24px;
   font-weight: 900;
-  margin-bottom: 4px;
+  line-height: 1;
+  margin-bottom: 2px;
 }
 
 #p1-panel .player-symbol { color: var(--accent-x); }
@@ -430,16 +441,26 @@ input[type="text"]:focus {
 
 .player-name-display {
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 700;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  margin-bottom: 2px;
+}
+
+.player-label {
+  font-size: 10px;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin-bottom: 6px;
 }
 
 .player-score-val {
-  font-size: 28px;
+  font-size: 30px;
   font-weight: 900;
-  margin-top: 6px;
   line-height: 1;
 }
 
@@ -451,7 +472,7 @@ input[type="text"]:focus {
   height: 7px;
   border-radius: 50%;
   display: inline-block;
-  margin-right: 4px;
+  flex-shrink: 0;
 }
 .player-online.on  { background: var(--green); box-shadow: 0 0 5px var(--green); }
 .player-online.off { background: #ff4444; }
@@ -462,23 +483,31 @@ input[type="text"]:focus {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: 2px;
+  padding: 0 4px;
+  flex-shrink: 0;
 }
 
 .draws-label {
-  font-size: 10px;
+  font-size: 9px;
   letter-spacing: 1px;
   text-transform: uppercase;
   color: var(--text-dim);
 }
 
 .draws-val {
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 700;
   color: var(--text-dim);
 }
 
-.score-dash { color: var(--border); font-size: 18px; font-weight: 300; }
+.score-vs {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--border);
+  letter-spacing: 1px;
+  margin-top: 2px;
+}
 
 /* ─── Board ─────────────────────────────────────────────────── */
 .board-wrapper {
@@ -616,6 +645,93 @@ input[type="text"]:focus {
 }
 .game-controls .btn { flex: 1; }
 
+/* ─── Voice Chat Bar ────────────────────────────────────────── */
+.voice-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 16px;
+  margin-top: 10px;
+  gap: 12px;
+}
+
+.voice-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-dim);
+  font-weight: 500;
+}
+
+.voice-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--border);
+  transition: background var(--trans), box-shadow var(--trans);
+  flex-shrink: 0;
+}
+
+.voice-dot.connecting { background: var(--accent-win); animation: pulse 1s ease infinite; }
+.voice-dot.connected  { background: var(--green); box-shadow: 0 0 6px var(--green); }
+.voice-dot.muted      { background: var(--accent-x); }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
+.voice-actions { display: flex; gap: 8px; align-items: center; }
+
+/* ─── Available Rooms List ──────────────────────────────────── */
+.rooms-empty {
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 13px;
+  padding: 20px 0;
+}
+
+.room-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--bg);
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 16px;
+  margin-bottom: 8px;
+  transition: border-color var(--trans), transform var(--trans);
+}
+
+.room-item:last-child { margin-bottom: 0; }
+
+.room-item:hover {
+  border-color: var(--accent-o);
+  transform: translateX(2px);
+}
+
+.room-item-info { display: flex; flex-direction: column; gap: 3px; }
+
+.room-item-host {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.room-item-code {
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  letter-spacing: 2px;
+  color: var(--text-dim);
+}
+
+.room-item .btn { width: auto; padding: 7px 16px; font-size: 13px; }
+
 /* ─── Shake Animation ───────────────────────────────────────── */
 @keyframes shake {
   0%, 100% { transform: translateX(0); }
@@ -635,6 +751,121 @@ input[type="text"]:focus {
 
 @media (max-width: 340px) {
   :root { --tile-size: 76px; }
+}
+
+/* ─── Lobby Chat ────────────────────────────────────────────── */
+.chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.online-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--green);
+  font-weight: 600;
+  background: rgba(62,207,142,0.08);
+  border: 1px solid rgba(62,207,142,0.2);
+  padding: 3px 10px;
+  border-radius: 20px;
+}
+
+#online-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  min-height: 38px;
+}
+
+.online-user-chip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 3px 10px;
+  color: var(--text);
+}
+
+.online-user-chip .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 4px var(--green);
+  flex-shrink: 0;
+}
+
+#chat-messages {
+  height: 200px;
+  overflow-y: auto;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chat-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  animation: fadeSlideIn 0.2s ease;
+}
+
+.chat-msg-header {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.chat-msg-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent-o);
+}
+
+.chat-msg-name.is-me { color: var(--accent-x); }
+
+.chat-msg-time {
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.chat-msg-text {
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.chat-system {
+  font-size: 11px;
+  color: var(--text-dim);
+  text-align: center;
+  font-style: italic;
+  padding: 2px 0;
+}
+
+.chat-input-row {
+  display: flex;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+}
+
+.chat-input-row input {
+  flex: 1;
+  margin: 0;
 }
 
 /* ─── Scrollbar ─────────────────────────────────────────────── */

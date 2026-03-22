@@ -151,6 +151,7 @@ async function createRoom() {
     $('room-code-display').textContent = roomId;
     showScreen('waiting-screen');
     SFX.join();
+    onEnterGame();
     listenToRoom();
   } catch (err) {
     console.error(err);
@@ -209,6 +210,7 @@ async function joinRoom() {
     state.roomRef    = roomRef;
 
     SFX.join();
+    onEnterGame();
     listenToRoom();
   } catch (err) {
     console.error(err);
@@ -263,9 +265,19 @@ function renderGame(data) {
   $('p1-panel').classList.toggle('active-player', turn === 'player1' && status === 'playing');
   $('p2-panel').classList.toggle('active-player', turn === 'player2' && status === 'playing');
 
-  // Mark "me"
-  $('p1-panel').classList.toggle('is-me', me === 'player1');
-  $('p2-panel').classList.toggle('is-me', me === 'player2');
+  // YOU badge — insert once, above the symbol
+  ['p1-panel','p2-panel'].forEach(id => {
+    const panel = $(id);
+    if (!panel.querySelector('.you-badge')) {
+      const badge = document.createElement('div');
+      badge.className = 'you-badge';
+      badge.textContent = 'YOU';
+      panel.insertBefore(badge, panel.firstChild);
+    }
+    panel.querySelector('.you-badge').style.visibility =
+      ((id === 'p1-panel' && me === 'player1') || (id === 'p2-panel' && me === 'player2'))
+        ? 'visible' : 'hidden';
+  });
 
   // Room code badge
   $('room-badge').textContent = '# ' + state.roomId;
@@ -429,6 +441,7 @@ async function requestRestart() {
 // ─── LEAVE ROOM ───────────────────────────────────────────────────────────
 async function leaveRoom() {
   SFX.click();
+  stopVoiceChat(true);
   if (state.unsubscribe) state.unsubscribe();
 
   if (state.roomRef) {
@@ -441,6 +454,7 @@ async function leaveRoom() {
   }
 
   resetState();
+  onExitGame();
   showScreen('lobby-screen');
   clearStatus();
 }
@@ -545,6 +559,326 @@ document.addEventListener('keydown', e => {
     }
   }
 });
+
+// ─── VOICE CHAT (WebRTC + Firebase Signaling) ─────────────────────────────
+const RTC_CONFIG = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+  ]
+};
+
+let localStream    = null;
+let peerConn       = null;
+let isMuted        = false;
+let voiceActive    = false;
+
+async function toggleVoiceChat() {
+  if (voiceActive) {
+    stopVoiceChat();
+  } else {
+    await startVoiceChat();
+  }
+}
+
+async function startVoiceChat() {
+  try {
+    setVoiceDot('connecting');
+    setVoiceText('Requesting mic…');
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      throw new Error('Mic not supported — use Chrome/Firefox on localhost or HTTPS');
+    }
+
+    localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    voiceActive = true;
+    updateVoiceUI();
+
+    peerConn = new RTCPeerConnection(RTC_CONFIG);
+
+    // Add local audio tracks
+    localStream.getTracks().forEach(t => peerConn.addTrack(t, localStream));
+
+    // Play remote audio when received
+    peerConn.ontrack = e => {
+      $('remote-audio').srcObject = e.streams[0];
+    };
+
+    // Send ICE candidates to Firebase
+    peerConn.onicecandidate = async e => {
+      if (e.candidate) {
+        await state.roomRef.child(`voice/ice_${state.playerId}`).push(e.candidate.toJSON());
+      }
+    };
+
+    peerConn.onconnectionstatechange = () => {
+      const s = peerConn.connectionState;
+      if (s === 'connected')    { setVoiceDot('connected');  setVoiceText('Connected'); }
+      if (s === 'connecting')   { setVoiceDot('connecting'); setVoiceText('Connecting…'); }
+      if (s === 'disconnected') { setVoiceDot('');           setVoiceText('Peer disconnected'); }
+      if (s === 'failed')       { stopVoiceChat(); setVoiceText('Connection failed'); }
+    };
+
+    if (state.playerId === 'player1') {
+      // Host creates the offer
+      const offer = await peerConn.createOffer();
+      await peerConn.setLocalDescription(offer);
+      await state.roomRef.child('voice/offer').set({ type: offer.type, sdp: offer.sdp });
+
+      // Wait for answer from player2
+      state.roomRef.child('voice/answer').on('value', async snap => {
+        if (snap.val() && peerConn && peerConn.signalingState === 'have-local-offer') {
+          await peerConn.setRemoteDescription(new RTCSessionDescription(snap.val()));
+        }
+      });
+
+      // Receive ICE from player2
+      state.roomRef.child('voice/ice_player2').on('child_added', async snap => {
+        if (snap.val() && peerConn) await peerConn.addIceCandidate(new RTCIceCandidate(snap.val()));
+      });
+
+    } else {
+      // Guest waits for offer then answers
+      setVoiceText('Waiting for host…');
+      state.roomRef.child('voice/offer').on('value', async snap => {
+        if (!snap.val() || !peerConn || peerConn.signalingState !== 'stable') return;
+        await peerConn.setRemoteDescription(new RTCSessionDescription(snap.val()));
+        const answer = await peerConn.createAnswer();
+        await peerConn.setLocalDescription(answer);
+        await state.roomRef.child('voice/answer').set({ type: answer.type, sdp: answer.sdp });
+      });
+
+      // Receive ICE from player1
+      state.roomRef.child('voice/ice_player1').on('child_added', async snap => {
+        if (snap.val() && peerConn) await peerConn.addIceCandidate(new RTCIceCandidate(snap.val()));
+      });
+    }
+
+  } catch (err) {
+    console.error('Voice chat error:', err);
+    const msg = err.name === 'NotAllowedError'
+      ? 'Mic access denied — allow mic in browser'
+      : (err.message || err.name || 'Voice chat failed');
+    setVoiceText(msg);
+    setVoiceDot('');
+    stopVoiceChat(true);
+  }
+}
+
+function stopVoiceChat(keepUI = false) {
+  if (localStream)  { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
+  if (peerConn)     { peerConn.close(); peerConn = null; }
+  voiceActive = false;
+  isMuted = false;
+
+  // Clean up Firebase signaling data
+  if (state.roomRef) state.roomRef.child('voice').remove().catch(() => {});
+
+  if (!keepUI) {
+    setVoiceDot('');
+    setVoiceText('Voice Chat');
+    $('voice-btn').textContent = 'Join Voice';
+    $('mute-btn').style.display = 'none';
+  }
+}
+
+function toggleMute() {
+  if (!localStream) return;
+  isMuted = !isMuted;
+  localStream.getAudioTracks().forEach(t => t.enabled = !isMuted);
+  $('mute-btn').textContent = isMuted ? 'Unmute' : 'Mute';
+  setVoiceDot(isMuted ? 'muted' : 'connected');
+  setVoiceText(isMuted ? 'Muted' : 'Connected');
+}
+
+function updateVoiceUI() {
+  const btn     = $('voice-btn');
+  const muteBtn = $('mute-btn');
+  if (!btn) return;
+  if (voiceActive) {
+    btn.textContent         = 'Leave Voice';
+    muteBtn.style.display   = 'inline-flex';
+    setVoiceDot('connecting');
+    setVoiceText('Connecting…');
+  } else {
+    btn.textContent         = 'Join Voice';
+    muteBtn.style.display   = 'none';
+  }
+}
+
+function setVoiceDot(state) {
+  const dot = $('voice-dot');
+  if (dot) dot.className = 'voice-dot ' + state;
+}
+
+function setVoiceText(msg) {
+  const el = $('voice-status-text');
+  if (el) el.textContent = msg;
+}
+
+// ─── AVAILABLE ROOMS BROWSER ──────────────────────────────────────────────
+function listenToAvailableRooms() {
+  const roomsRef = db.ref('rooms');
+
+  roomsRef.on('value', snap => {
+    const data = snap.val();
+    const list = $('rooms-list');
+    const count = $('rooms-count');
+
+    if (!list) return;
+
+    const openRooms = [];
+    if (data) {
+      Object.entries(data).forEach(([id, room]) => {
+        if (room.status === 'waiting' && room.player1) {
+          openRooms.push({ id, host: room.player1.name });
+        }
+      });
+    }
+
+    if (openRooms.length === 0) {
+      count.textContent = 'No open rooms';
+      list.innerHTML = '<div class="rooms-empty">No open rooms yet. Create one!</div>';
+      return;
+    }
+
+    count.textContent = openRooms.length + ' open';
+    list.innerHTML = '';
+
+    openRooms.forEach(({ id, host }) => {
+      const item = el('div', 'room-item');
+      item.innerHTML = `
+        <div class="room-item-info">
+          <span class="room-item-host">${escapeHtml(host)}'s Room</span>
+          <span class="room-item-code"># ${id}</span>
+        </div>
+        <button class="btn btn-secondary" onclick="quickJoin('${id}')">Join</button>
+      `;
+      list.appendChild(item);
+    });
+  });
+}
+
+function escapeHtml(str) {
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+async function quickJoin(roomId) {
+  SFX.click();
+  const name = $('player-name-input').value.trim();
+  if (!name) { shakeInput('player-name-input'); setStatus('Enter your name first!', 'error'); return; }
+
+  // Pre-fill the code input and call joinRoom
+  $('room-id-input').value = roomId;
+  await joinRoom();
+}
+
+// Start listening to available rooms on page load
+listenToAvailableRooms();
+
+// ─── LOBBY CHAT & ONLINE PRESENCE ────────────────────────────────────────
+let lobbyUserId   = null;   // unique key for this browser session
+let lobbyUserName = '';
+
+function initLobby() {
+  lobbyUserId = db.ref('lobby/online').push().key; // generate unique ID
+
+  // Listen to online users
+  db.ref('lobby/online').on('value', snap => {
+    const data = snap.val() || {};
+    const users = Object.values(data).filter(u => u && u.name);
+    $('online-num').textContent = users.length;
+
+    const list = $('online-list');
+    list.innerHTML = '';
+    users.forEach(u => {
+      const chip = el('div', 'online-user-chip');
+      chip.innerHTML = `<span class="dot"></span>${escapeHtml(u.name)}`;
+      list.appendChild(chip);
+    });
+  });
+
+  // Listen to chat messages (last 60)
+  db.ref('lobby/messages').limitToLast(60).on('child_added', snap => {
+    const msg = snap.val();
+    if (!msg) return;
+    appendChatMessage(msg);
+  });
+
+  // Chat input — send on Enter
+  $('chat-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') sendChat();
+  });
+}
+
+function setLobbyPresence(name) {
+  if (!name || !lobbyUserId) return;
+  if (name === lobbyUserName) return; // no change
+  lobbyUserName = name;
+
+  const ref = db.ref(`lobby/online/${lobbyUserId}`);
+  ref.set({ name });
+  ref.onDisconnect().remove();
+}
+
+function removeLobbyPresence() {
+  if (!lobbyUserId) return;
+  db.ref(`lobby/online/${lobbyUserId}`).remove().catch(() => {});
+  lobbyUserName = '';
+}
+
+async function sendChat() {
+  const input = $('chat-input');
+  const text  = input.value.trim();
+  if (!text) return;
+
+  const name = $('player-name-input').value.trim();
+  if (!name) { shakeInput('player-name-input'); setStatus('Enter your name to chat.', 'error'); return; }
+
+  setLobbyPresence(name);
+  input.value = '';
+
+  await db.ref('lobby/messages').push({
+    name,
+    text,
+    uid:  lobbyUserId,
+    time: firebase.database.ServerValue.TIMESTAMP,
+  });
+}
+
+function appendChatMessage(msg) {
+  const box   = $('chat-messages');
+  const isMe  = msg.uid === lobbyUserId;
+
+  const div   = el('div', 'chat-msg');
+  const ts    = msg.time ? new Date(msg.time).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }) : '';
+
+  div.innerHTML = `
+    <div class="chat-msg-header">
+      <span class="chat-msg-name${isMe ? ' is-me' : ''}">${escapeHtml(msg.name)}</span>
+      <span class="chat-msg-time">${ts}</span>
+    </div>
+    <div class="chat-msg-text">${escapeHtml(msg.text)}</div>
+  `;
+  box.appendChild(div);
+  box.scrollTop = box.scrollHeight;
+}
+
+// Update presence whenever name changes
+$('player-name-input').addEventListener('input', function() {
+  const name = this.value.trim();
+  if (name.length >= 2) setLobbyPresence(name);
+});
+
+// Remove presence when entering a game room
+const _origCreateRoom = createRoom;
+const _origJoinRoom   = joinRoom;
+// Wrapped below in their existing functions — instead patch via leaveRoom restore
+function onEnterGame()  { removeLobbyPresence(); }
+function onExitGame()   { const name = $('player-name-input').value.trim(); if (name) setLobbyPresence(name); }
+
+// Init lobby on load
+initLobby();
 
 // ─── INPUT FORMATTING ─────────────────────────────────────────────────────
 $('room-id-input').addEventListener('input', function() {

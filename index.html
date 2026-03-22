@@ -73,7 +73,7 @@
     <div class="card">
       <div class="card-title">New Game</div>
       <p style="font-size:13px;color:var(--text-dim);margin-bottom:16px;line-height:1.6;">
-        Create a private room and share the code with a friend.
+        Create a room — it will appear in the list so anyone can join.
       </p>
       <button class="btn btn-primary" id="create-btn" onclick="createRoom()">
         Create Room
@@ -81,11 +81,25 @@
     </div>
 
     <!-- Divider -->
-    <div class="divider" style="width:100%;max-width:480px;">or</div>
+    <div class="divider" style="width:100%;max-width:480px;">or join a room</div>
 
-    <!-- Join -->
+    <!-- Available Rooms -->
     <div class="card">
-      <div class="card-title">Join Game</div>
+      <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;">
+        <span>Available Rooms</span>
+        <span id="rooms-count" style="font-size:11px;color:var(--text-dim);letter-spacing:0;">Loading…</span>
+      </div>
+      <div id="rooms-list">
+        <div class="rooms-empty">No open rooms yet. Create one!</div>
+      </div>
+    </div>
+
+    <!-- Divider -->
+    <div class="divider" style="width:100%;max-width:480px;">or use a code</div>
+
+    <!-- Join by code -->
+    <div class="card">
+      <div class="card-title">Join by Code</div>
       <div class="input-group">
         <label for="room-id-input">Room Code</label>
         <input
@@ -103,6 +117,23 @@
     </div>
 
     <p id="status-msg" class="status-msg"></p>
+
+    <!-- Lobby Chat -->
+    <div class="card" style="width:100%;padding:0;overflow:hidden;">
+      <div class="chat-header">
+        <span class="card-title" style="margin:0;">Lobby Chat</span>
+        <span id="online-count" class="online-pill">
+          <span class="conn-dot online" style="width:7px;height:7px;"></span>
+          <span id="online-num">0</span> online
+        </span>
+      </div>
+      <div id="online-list"></div>
+      <div id="chat-messages"></div>
+      <div class="chat-input-row">
+        <input type="text" id="chat-input" placeholder="Say something…" maxlength="120" autocomplete="off" spellcheck="false" />
+        <button class="btn btn-secondary btn-sm" onclick="sendChat()">Send</button>
+      </div>
+    </div>
 
   </section>
 
@@ -163,7 +194,7 @@
       <!-- Player 1 (X) -->
       <div class="player-panel" id="p1-panel">
         <div class="player-symbol">X</div>
-        <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px;">
+        <div class="player-label">
           <span class="player-online off" id="p1-online"></span>Player 1
         </div>
         <div class="player-name-display" id="p1-name">—</div>
@@ -174,13 +205,13 @@
       <div class="score-sep">
         <div class="draws-label">Draws</div>
         <div class="draws-val" id="draws-score">0</div>
-        <div class="score-dash">—</div>
+        <div class="score-vs">VS</div>
       </div>
 
       <!-- Player 2 (O) -->
       <div class="player-panel" id="p2-panel">
         <div class="player-symbol">O</div>
-        <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px;">
+        <div class="player-label">
           <span class="player-online off" id="p2-online"></span>Player 2
         </div>
         <div class="player-name-display" id="p2-name">—</div>
@@ -206,6 +237,22 @@
     <!-- Status -->
     <p id="status-msg" class="status-msg"></p>
 
+    <!-- Voice Chat Bar -->
+    <div class="voice-bar" id="voice-bar">
+      <div class="voice-info">
+        <span class="voice-dot" id="voice-dot"></span>
+        <span id="voice-status-text">Voice Chat</span>
+      </div>
+      <div class="voice-actions">
+        <button class="btn btn-ghost btn-sm" id="mute-btn" onclick="toggleMute()" style="display:none;">
+          Mute
+        </button>
+        <button class="btn btn-ghost btn-sm" id="voice-btn" onclick="toggleVoiceChat()">
+          Join Voice
+        </button>
+      </div>
+    </div>
+
     <!-- Controls -->
     <div class="game-controls" style="margin-top:8px;">
       <button class="btn btn-ghost" onclick="requestRestart()">Restart</button>
@@ -213,6 +260,9 @@
     </div>
 
   </section>
+
+  <!-- Hidden audio element for remote stream -->
+  <audio id="remote-audio" autoplay playsinline></audio>
 
 </div><!-- /#app -->
 
