@@ -265,18 +265,16 @@ function renderGame(data) {
   $('p1-panel').classList.toggle('active-player', turn === 'player1' && status === 'playing');
   $('p2-panel').classList.toggle('active-player', turn === 'player2' && status === 'playing');
 
-  // YOU badge — insert once, above the symbol
-  ['p1-panel','p2-panel'].forEach(id => {
+  // YOU badge — always present for equal height; text set per player
+  [['p1-panel','player1'],['p2-panel','player2']].forEach(([id, pid]) => {
     const panel = $(id);
-    if (!panel.querySelector('.you-badge')) {
-      const badge = document.createElement('div');
+    let badge = panel.querySelector('.you-badge');
+    if (!badge) {
+      badge = document.createElement('div');
       badge.className = 'you-badge';
-      badge.textContent = 'YOU';
       panel.insertBefore(badge, panel.firstChild);
     }
-    panel.querySelector('.you-badge').style.visibility =
-      ((id === 'p1-panel' && me === 'player1') || (id === 'p2-panel' && me === 'player2'))
-        ? 'visible' : 'hidden';
+    badge.textContent = me === pid ? 'YOU' : '';
   });
 
   // Room code badge

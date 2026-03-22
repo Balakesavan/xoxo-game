@@ -415,18 +415,18 @@ input[type="text"]:focus {
 }
 .player-panel.active-player::before { opacity: 1; }
 
-/* YOU badge — sits above the symbol, doesn't overlap */
+/* YOU badge — always takes same space; hidden when not "you" */
 .you-badge {
-  display: inline-block;
+  display: block;
   font-size: 9px;
   font-weight: 800;
   letter-spacing: 1.5px;
-  color: var(--text-dim);
-  background: rgba(255,255,255,0.06);
-  border: 1px solid var(--border);
+  color: var(--accent-win);
   border-radius: 4px;
   padding: 1px 6px;
   margin-bottom: 4px;
+  height: 16px;
+  line-height: 14px;
 }
 
 .player-symbol {
