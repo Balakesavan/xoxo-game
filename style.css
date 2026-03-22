@@ -867,6 +867,46 @@ input[type="text"]:focus {
   margin: 0;
 }
 
+/* ─── Turn Timer ────────────────────────────────────────────── */
+.turn-timer {
+  font-family: 'Courier New', monospace;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--text-dim);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px 14px;
+  margin-bottom: 4px;
+  transition: color var(--trans), border-color var(--trans), box-shadow var(--trans);
+}
+
+.turn-timer.urgent {
+  color: var(--accent-x);
+  border-color: var(--accent-x);
+  box-shadow: 0 0 8px rgba(244,91,106,0.35);
+  animation: pulse 0.6s ease infinite;
+}
+
+/* ─── Restart Vote Status ───────────────────────────────────── */
+.restart-status-text {
+  font-size: 12px;
+  color: var(--accent-o);
+  font-weight: 500;
+  min-height: 16px;
+  text-align: center;
+}
+
+/* ─── In-Progress Room Items ────────────────────────────────── */
+.room-item-active .room-item-code {
+  color: var(--accent-o);
+}
+
+.room-item-active:hover {
+  border-color: var(--text-dim);
+}
+
 /* ─── Scrollbar ─────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: var(--bg); }

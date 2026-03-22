@@ -63,15 +63,25 @@ const WIN_COMBOS = [
   [0,4,8],[2,4,6]          // diagonals
 ];
 
+const TURN_TIME_MS = 20 * 1000; // 20-second turn limit
+
 // ─── State ────────────────────────────────────────────────────────────────
 let state = {
   roomId:      null,
-  playerId:    null,  // 'player1' | 'player2'
+  playerId:    null,  // 'player1' | 'player2' | null (spectator)
   playerName:  '',
   roomRef:     null,
   gameData:    null,
   unsubscribe: null,
+  isSpectator: false,
 };
+
+// ─── Timer & Result State ─────────────────────────────────────────────────
+let timerInterval        = null;
+let trackedTurnStartedAt = null;
+let timerFired           = false;
+let lastPerformedRestartAt = 0;
+let lastResultRendered   = null; // prevents SFX replaying on re-renders
 
 // ─── DOM Helpers ──────────────────────────────────────────────────────────
 const $  = id => document.getElementById(id);
@@ -126,16 +136,18 @@ async function createRoom() {
   const roomRef = db.ref('rooms/' + roomId);
 
   const initialData = {
-    board:      Array(9).fill(''),
-    turn:       'player1',
-    status:     'waiting',
-    winner:     null,
-    winLine:    null,
-    scores:     { player1: 0, player2: 0, draws: 0 },
-    player1:    { name, online: true },
-    player2:    null,
-    createdAt:  firebase.database.ServerValue.TIMESTAMP,
-    lastActivity: firebase.database.ServerValue.TIMESTAMP,
+    board:         Array(9).fill(''),
+    turn:          'player1',
+    status:        'waiting',
+    winner:        null,
+    winLine:       null,
+    scores:        { player1: 0, player2: 0, draws: 0 },
+    player1:       { name, online: true },
+    player2:       null,
+    restartVote:   null,
+    turnStartedAt: firebase.database.ServerValue.TIMESTAMP,
+    createdAt:     firebase.database.ServerValue.TIMESTAMP,
+    lastActivity:  firebase.database.ServerValue.TIMESTAMP,
   };
 
   try {
@@ -238,12 +250,12 @@ function listenToRoom() {
 
 // ─── RENDER GAME ──────────────────────────────────────────────────────────
 function renderGame(data) {
-  const { board, turn, status, winner, winLine, scores, player1, player2 } = data;
-  const me    = state.playerId;
+  const { board, turn, status, winLine, scores, player1, player2, turnStartedAt } = data;
+  const me    = state.playerId; // null for spectators
   const other = me === 'player1' ? 'player2' : 'player1';
 
-  // ── Waiting screen ──
-  if (status === 'waiting') {
+  // ── Waiting screen (players only) ──
+  if (status === 'waiting' && !state.isSpectator) {
     showScreen('waiting-screen');
     return;
   }
@@ -252,23 +264,23 @@ function renderGame(data) {
   showScreen('game-screen');
 
   // Player name panels
-  $('p1-name').textContent = player1?.name || 'Player 1';
-  $('p2-name').textContent = player2?.name || 'Player 2';
-  $('p1-score').textContent = scores?.player1 ?? 0;
-  $('p2-score').textContent = scores?.player2 ?? 0;
+  $('p1-name').textContent     = player1?.name || 'Player 1';
+  $('p2-name').textContent     = player2?.name || 'Player 2';
+  $('p1-score').textContent    = scores?.player1 ?? 0;
+  $('p2-score').textContent    = scores?.player2 ?? 0;
   $('draws-score').textContent = scores?.draws ?? 0;
 
   // Online indicators
   $('p1-online').className = 'player-online ' + (player1?.online ? 'on' : 'off');
   $('p2-online').className = 'player-online ' + (player2?.online ? 'on' : 'off');
 
-  // Highlight active player border + turn arrow in VS column
+  // Active player highlight + turn arrow
   $('p1-panel').classList.toggle('active-player', turn === 'player1' && status === 'playing');
   $('p2-panel').classList.toggle('active-player', turn === 'player2' && status === 'playing');
   const vsEl = document.querySelector('.score-vs');
   if (vsEl) vsEl.textContent = status === 'playing' ? (turn === 'player1' ? '←' : '→') : 'VS';
 
-  // YOU badge — always present for equal height; text set per player
+  // YOU / WATCH badge
   [['p1-panel','player1'],['p2-panel','player2']].forEach(([id, pid]) => {
     const panel = $(id);
     let badge = panel.querySelector('.you-badge');
@@ -277,26 +289,59 @@ function renderGame(data) {
       badge.className = 'you-badge';
       panel.insertBefore(badge, panel.firstChild);
     }
-    badge.textContent = me === pid ? 'YOU' : '';
+    badge.textContent = state.isSpectator ? '' : (me === pid ? 'YOU' : '');
   });
 
-  // Room code badge
-  $('room-badge').textContent = '# ' + state.roomId;
+  // Room badge — show spectator indicator
+  $('room-badge').textContent = (state.isSpectator ? 'WATCH ' : '# ') + state.roomId;
+
+  // Hide voice bar and restart button for spectators
+  const voiceBar = $('voice-bar');
+  if (voiceBar) voiceBar.style.display = state.isSpectator ? 'none' : '';
+  const ctrlRestart = document.querySelector('.game-controls .btn:first-child');
+  if (ctrlRestart) ctrlRestart.style.display = state.isSpectator ? 'none' : '';
 
   // Board
   renderBoard(board, turn, status, winLine, me);
 
-  // Status bar
+  // ── Playing state ──
   if (status === 'playing') {
-    if (turn === me) {
+    // Start timer only when turn changes
+    const ts = turnStartedAt || Date.now();
+    if (ts !== trackedTurnStartedAt) {
+      trackedTurnStartedAt = ts;
+      startTurnTimer(ts, turn);
+    }
+
+    const timerEl = $('turn-timer');
+    if (timerEl) timerEl.style.display = '';
+
+    if (state.isSpectator) {
+      const activeName = (turn === 'player1' ? player1?.name : player2?.name) || 'Player';
+      setStatus(activeName + "'s turn…");
+    } else if (turn === me) {
       setStatus('Your turn (' + (me === 'player1' ? 'X' : 'O') + ')', 'my-turn');
     } else {
       const oppName = data[other]?.name || 'Opponent';
       setStatus(oppName + "'s turn…");
     }
     $('result-overlay').classList.remove('visible');
+
+  // ── Finished state ──
   } else if (status === 'finished') {
-    showResult(data, me, other);
+    clearInterval(timerInterval);
+    timerInterval = null;
+    trackedTurnStartedAt = null;
+    const timerEl = $('turn-timer');
+    if (timerEl) { timerEl.textContent = ''; timerEl.style.display = 'none'; }
+
+    // Both voted → perform restart (both clients fire; debounce prevents double)
+    const vote = data.restartVote || {};
+    if (!state.isSpectator && vote.player1 && vote.player2) {
+      performRestart();
+    } else {
+      showResult(data, me, other);
+    }
   }
 }
 
@@ -362,17 +407,20 @@ async function makeMove(index) {
   const updates = { board: newBoard, lastActivity: firebase.database.ServerValue.TIMESTAMP };
 
   if (winner) {
-    updates.status  = 'finished';
-    updates.winner  = state.playerId;
-    updates.winLine = winLine;
-    const scoreKey  = `scores/${state.playerId}`;
-    updates[scoreKey] = (data.scores?.[state.playerId] ?? 0) + 1;
+    updates.status       = 'finished';
+    updates.winner       = state.playerId;
+    updates.winLine      = winLine;
+    updates.restartVote  = null;
+    const scoreKey       = `scores/${state.playerId}`;
+    updates[scoreKey]    = (data.scores?.[state.playerId] ?? 0) + 1;
   } else if (isDraw) {
-    updates.status = 'finished';
-    updates.winner = 'draw';
+    updates.status          = 'finished';
+    updates.winner          = 'draw';
+    updates.restartVote     = null;
     updates['scores/draws'] = (data.scores?.draws ?? 0) + 1;
   } else {
-    updates.turn = nextTurn;
+    updates.turn          = nextTurn;
+    updates.turnStartedAt = firebase.database.ServerValue.TIMESTAMP;
   }
 
   try {
@@ -396,57 +444,101 @@ function checkWinner(board) {
 
 // ─── SHOW RESULT ──────────────────────────────────────────────────────────
 function showResult(data, me, other) {
-  const overlay = $('result-overlay');
-  const title   = $('result-title');
-  const sub     = $('result-sub');
+  const overlay       = $('result-overlay');
+  const title         = $('result-title');
+  const sub           = $('result-sub');
+  const restartStatus = $('restart-status');
+  const restartBtn    = $('restart-btn');
 
-  if (data.winner === 'draw') {
-    title.textContent = "It's a Draw!";
-    sub.textContent   = 'Well played by both sides.';
-    title.className   = 'result-title draw';
-    SFX.draw();
-  } else if (data.winner === me) {
-    title.textContent = 'You Win! 🎉';
-    sub.textContent   = 'Outstanding move!';
-    title.className   = 'result-title win';
-    SFX.win();
-    launchConfetti();
+  // Determine result key to avoid replaying SFX on re-renders
+  const resultKey = data.winner === 'draw' ? 'draw' : (data.winner === me ? 'win' : 'lose');
+
+  if (resultKey !== lastResultRendered) {
+    lastResultRendered = resultKey;
+    if (resultKey === 'draw') {
+      title.textContent = "It's a Draw!";
+      sub.textContent   = 'Well played by both sides.';
+      title.className   = 'result-title draw';
+      SFX.draw();
+    } else if (resultKey === 'win') {
+      title.textContent = 'You Win!';
+      sub.textContent   = 'Outstanding move!';
+      title.className   = 'result-title win';
+      SFX.win();
+      launchConfetti();
+    } else {
+      const oppName = data[other]?.name || 'Opponent';
+      title.textContent = (state.isSpectator ? oppName : oppName) + ' Wins!';
+      sub.textContent   = state.isSpectator ? 'Game over.' : 'Better luck next round.';
+      title.className   = 'result-title lose';
+      if (!state.isSpectator) SFX.lose();
+    }
+  }
+
+  // Restart vote UI
+  if (state.isSpectator) {
+    if (restartStatus) restartStatus.textContent = 'Spectating';
+    if (restartBtn)    restartBtn.style.display   = 'none';
   } else {
-    const oppName = data[other]?.name || 'Opponent';
-    title.textContent = oppName + ' Wins!';
-    sub.textContent   = 'Better luck next round.';
-    title.className   = 'result-title lose';
-    SFX.lose();
+    if (restartBtn) restartBtn.style.display = '';
+    const vote     = data.restartVote || {};
+    const myVote   = vote[me];
+    const oppVote  = vote[other];
+    const oppName  = data[other]?.name || 'Opponent';
+    if (myVote && !oppVote) {
+      if (restartStatus) restartStatus.textContent = 'Waiting for ' + oppName + '…';
+      if (restartBtn)    { restartBtn.textContent = 'Waiting…'; restartBtn.disabled = true; }
+    } else if (!myVote && oppVote) {
+      if (restartStatus) restartStatus.textContent = oppName + ' wants a rematch!';
+      if (restartBtn)    { restartBtn.textContent = 'Accept!'; restartBtn.disabled = false; }
+    } else {
+      if (restartStatus) restartStatus.textContent = '';
+      if (restartBtn)    { restartBtn.textContent = 'Play Again'; restartBtn.disabled = false; }
+    }
   }
 
   overlay.classList.add('visible');
 }
 
-// ─── RESTART ──────────────────────────────────────────────────────────────
+// ─── RESTART (vote system — both players must agree) ──────────────────────
 async function requestRestart() {
   SFX.click();
+  if (state.isSpectator) return;
   if (!state.roomRef || !state.gameData) return;
+  if (state.gameData.status !== 'finished') return;
+  try {
+    await state.roomRef.child(`restartVote/${state.playerId}`).set(true);
+  } catch(e) { console.error('Vote failed:', e); }
+}
 
-  await state.roomRef.update({
-    board:        Array(9).fill(''),
-    turn:         'player1',
-    status:       'playing',
-    winner:       null,
-    winLine:      null,
-    lastActivity: firebase.database.ServerValue.TIMESTAMP,
-  });
-
-  prevBoard = Array(9).fill(null);
-  $('result-overlay').classList.remove('visible');
+async function performRestart() {
+  const now = Date.now();
+  if (now - lastPerformedRestartAt < 3000) return; // debounce double-fire
+  lastPerformedRestartAt = now;
+  lastResultRendered = null;
+  try {
+    await state.roomRef.update({
+      board:         Array(9).fill(''),
+      turn:          'player1',
+      status:        'playing',
+      winner:        null,
+      winLine:       null,
+      restartVote:   null,
+      turnStartedAt: firebase.database.ServerValue.TIMESTAMP,
+      lastActivity:  firebase.database.ServerValue.TIMESTAMP,
+    });
+    prevBoard = Array(9).fill(null);
+    $('result-overlay').classList.remove('visible');
+  } catch(e) { console.error('Restart failed:', e); }
 }
 
 // ─── LEAVE ROOM ───────────────────────────────────────────────────────────
 async function leaveRoom() {
   SFX.click();
-  stopVoiceChat(true);
+  if (!state.isSpectator) stopVoiceChat(true);
   if (state.unsubscribe) state.unsubscribe();
 
-  if (state.roomRef) {
+  if (state.roomRef && !state.isSpectator) {
     // If host leaves, delete the room; guest just marks offline
     if (state.playerId === 'player1') {
       await state.roomRef.remove().catch(() => {});
@@ -469,8 +561,51 @@ function handleRoomDeleted() {
 
 function resetState() {
   if (state.unsubscribe) state.unsubscribe();
-  state = { roomId: null, playerId: null, playerName: '', roomRef: null, gameData: null, unsubscribe: null };
+  state = { roomId: null, playerId: null, playerName: '', roomRef: null, gameData: null, unsubscribe: null, isSpectator: false };
   prevBoard = Array(9).fill(null);
+  clearInterval(timerInterval);
+  timerInterval = null;
+  trackedTurnStartedAt = null;
+  timerFired = false;
+  lastResultRendered = null;
+}
+
+// ─── TURN TIMER ───────────────────────────────────────────────────────────
+function startTurnTimer(turnStartedAt, currentTurn) {
+  clearInterval(timerInterval);
+  timerFired = false;
+
+  timerInterval = setInterval(() => {
+    const elapsed   = Date.now() - turnStartedAt;
+    const remaining = Math.max(0, TURN_TIME_MS - elapsed);
+    const secs      = Math.ceil(remaining / 1000);
+
+    const timerEl = $('turn-timer');
+    if (timerEl) {
+      timerEl.textContent = secs + 's';
+      timerEl.className   = 'turn-timer' + (secs <= 5 ? ' urgent' : '');
+    }
+
+    if (remaining <= 0 && !timerFired) {
+      timerFired = true;
+      clearInterval(timerInterval);
+      if (!state.isSpectator) skipTurn(currentTurn);
+    }
+  }, 250);
+}
+
+async function skipTurn(timedOutPlayer) {
+  if (!state.roomRef || !state.gameData) return;
+  if (state.gameData.status !== 'playing') return;
+  if (state.gameData.turn !== timedOutPlayer) return; // already moved
+  const nextTurn = timedOutPlayer === 'player1' ? 'player2' : 'player1';
+  try {
+    await state.roomRef.update({
+      turn:          nextTurn,
+      turnStartedAt: firebase.database.ServerValue.TIMESTAMP,
+      lastActivity:  firebase.database.ServerValue.TIMESTAMP,
+    });
+  } catch(e) { console.error('Skip turn failed:', e); }
 }
 
 // ─── COPY ROOM CODE ───────────────────────────────────────────────────────
@@ -730,7 +865,8 @@ function listenToAvailableRooms() {
     if (!list) return;
 
     const now = Date.now();
-    const openRooms = [];
+    const openRooms   = [];
+    const activeRooms = [];
 
     Object.entries(data).forEach(([id, room]) => {
       if (!room) return;
@@ -742,12 +878,15 @@ function listenToAvailableRooms() {
         return;
       }
 
-      if (room.status === 'waiting' && room.player1 && room.player1.name) {
+      if (room.status === 'waiting' && room.player1?.name) {
         openRooms.push({ id, host: room.player1.name });
+      } else if (room.status === 'playing' && room.player1?.name && room.player2?.name) {
+        activeRooms.push({ id, p1: room.player1.name, p2: room.player2.name });
       }
     });
 
-    if (openRooms.length === 0) {
+    const total = openRooms.length + activeRooms.length;
+    if (total === 0) {
       count.textContent = 'No open rooms';
       list.innerHTML = '<div class="rooms-empty">No open rooms yet. Create one!</div>';
       return;
@@ -767,6 +906,18 @@ function listenToAvailableRooms() {
       `;
       list.appendChild(item);
     });
+
+    activeRooms.forEach(({ id, p1, p2 }) => {
+      const item = el('div', 'room-item room-item-active');
+      item.innerHTML = `
+        <div class="room-item-info">
+          <span class="room-item-host">${escapeHtml(p1)} vs ${escapeHtml(p2)}</span>
+          <span class="room-item-code"># ${id} · In Progress</span>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="quickWatch('${id}')">Watch</button>
+      `;
+      list.appendChild(item);
+    });
   });
 }
 
@@ -778,10 +929,37 @@ async function quickJoin(roomId) {
   SFX.click();
   const name = $('player-name-input').value.trim();
   if (!name) { shakeInput('player-name-input'); setStatus('Enter your name first!', 'error'); return; }
-
-  // Pre-fill the code input and call joinRoom
   $('room-id-input').value = roomId;
   await joinRoom();
+}
+
+// ─── SPECTATOR ────────────────────────────────────────────────────────────
+async function watchRoom(roomId) {
+  SFX.click();
+  const roomRef = db.ref('rooms/' + roomId);
+  try {
+    const snap = await withTimeout(roomRef.once('value'));
+    const data  = snap.val();
+    if (!data || data.status === 'waiting' || data.status === 'finished') {
+      setStatus('Room not available to watch.', 'error');
+      return;
+    }
+    state.roomId     = roomId;
+    state.playerId   = null;
+    state.playerName = $('player-name-input').value.trim() || 'Spectator';
+    state.roomRef    = roomRef;
+    state.isSpectator = true;
+    SFX.join();
+    onEnterGame();
+    listenToRoom();
+  } catch(err) {
+    console.error(err);
+    setStatus('Could not watch room.', 'error');
+  }
+}
+
+function quickWatch(roomId) {
+  watchRoom(roomId);
 }
 
 // Start listening to available rooms on page load

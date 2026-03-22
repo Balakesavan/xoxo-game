@@ -228,11 +228,15 @@
       <div id="result-overlay">
         <div class="result-title" id="result-title">—</div>
         <div id="result-sub"></div>
-        <button class="btn btn-primary btn-sm" onclick="requestRestart()" style="width:140px;">
+        <div id="restart-status" class="restart-status-text"></div>
+        <button class="btn btn-primary btn-sm" id="restart-btn" onclick="requestRestart()" style="width:140px;">
           Play Again
         </button>
       </div>
     </div>
+
+    <!-- Turn Timer -->
+    <div id="turn-timer" class="turn-timer" style="display:none;"></div>
 
     <!-- Status -->
     <p id="status-msg" class="status-msg"></p>
