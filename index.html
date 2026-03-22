@@ -21,7 +21,7 @@
 </head>
 <body>
 
-<!-- Confetti Canvas (full-screen, z-index 999) -->
+<!-- Confetti Canvas -->
 <canvas id="confetti-canvas"></canvas>
 
 <!-- Connection Status -->
@@ -30,14 +30,11 @@
   <span id="conn-label">Offline</span>
 </div>
 
-<!-- ================================================================ -->
-<!--  APP                                                              -->
-<!-- ================================================================ -->
 <div id="app">
 
-  <!-- ============================================================ -->
-  <!--  LOBBY SCREEN                                                 -->
-  <!-- ============================================================ -->
+  <!-- ================================================================ -->
+  <!--  LOBBY SCREEN                                                     -->
+  <!-- ================================================================ -->
   <section id="lobby-screen" class="screen active">
 
     <!-- Logo -->
@@ -54,72 +51,59 @@
       <div class="logo-sub">Multiplayer</div>
     </div>
 
-    <!-- Player Name -->
-    <div class="card" style="margin-bottom:0">
-      <div class="card-title">Your Name</div>
-      <div class="input-group">
-        <input
-          type="text"
-          id="player-name-input"
-          placeholder="Enter your name…"
-          maxlength="18"
-          autocomplete="off"
-          spellcheck="false"
-        />
-      </div>
-    </div>
-
-    <!-- Create -->
-    <div class="card">
-      <div class="card-title">New Game</div>
-      <p style="font-size:13px;color:var(--text-dim);margin-bottom:16px;line-height:1.6;">
-        Create a room — it will appear in the list so anyone can join.
-      </p>
+    <!-- Name + Create (combined card) -->
+    <div class="card lobby-main-card">
+      <input
+        type="text"
+        id="player-name-input"
+        class="name-input"
+        placeholder="Enter your name…"
+        maxlength="18"
+        autocomplete="off"
+        spellcheck="false"
+      />
       <button class="btn btn-primary" id="create-btn" onclick="createRoom()">
         Create Room
       </button>
     </div>
 
-    <!-- Divider -->
-    <div class="divider" style="width:100%;max-width:480px;">or join a room</div>
-
     <!-- Available Rooms -->
-    <div class="card">
-      <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;">
-        <span>Available Rooms</span>
-        <span id="rooms-count" style="font-size:11px;color:var(--text-dim);letter-spacing:0;">Loading…</span>
+    <div class="card rooms-card">
+      <div class="rooms-card-header">
+        <span class="card-title" style="margin:0;">Rooms</span>
+        <span id="rooms-count" class="rooms-count-badge">Loading…</span>
       </div>
+
       <div id="rooms-list">
-        <div class="rooms-empty">No open rooms yet. Create one!</div>
+        <div class="rooms-empty">
+          <div class="rooms-empty-icon">○</div>
+          No open rooms yet — create one!
+        </div>
       </div>
-    </div>
 
-    <!-- Divider -->
-    <div class="divider" style="width:100%;max-width:480px;">or use a code</div>
-
-    <!-- Join by code -->
-    <div class="card">
-      <div class="card-title">Join by Code</div>
-      <div class="input-group">
-        <label for="room-id-input">Room Code</label>
-        <input
-          type="text"
-          id="room-id-input"
-          placeholder="A B C 1 2 3"
-          maxlength="6"
-          autocomplete="off"
-          spellcheck="false"
-        />
-      </div>
-      <button class="btn btn-secondary" id="join-btn" onclick="joinRoom()">
-        Join Room
+      <!-- Collapsible join-by-code -->
+      <button class="code-toggle-btn" id="code-toggle-btn" onclick="toggleCodePanel()">
+        Have a code? →
       </button>
+      <div id="code-panel" class="code-panel">
+        <div class="code-panel-inner">
+          <input
+            type="text"
+            id="room-id-input"
+            placeholder="ABC123"
+            maxlength="6"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <button class="btn btn-secondary btn-sm" id="join-btn" onclick="joinRoom()">Join</button>
+        </div>
+      </div>
     </div>
 
     <p id="status-msg" class="status-msg"></p>
 
     <!-- Lobby Chat -->
-    <div class="card" style="width:100%;padding:0;overflow:hidden;">
+    <div class="card chat-card">
       <div class="chat-header">
         <span class="card-title" style="margin:0;">Lobby Chat</span>
         <span id="online-count" class="online-pill">
@@ -138,9 +122,9 @@
   </section>
 
 
-  <!-- ============================================================ -->
-  <!--  WAITING SCREEN                                               -->
-  <!-- ============================================================ -->
+  <!-- ================================================================ -->
+  <!--  WAITING SCREEN                                                   -->
+  <!-- ================================================================ -->
   <section id="waiting-screen" class="screen">
 
     <div class="logo" style="margin-bottom:24px">
@@ -160,12 +144,12 @@
         <div id="room-code-display">——</div>
       </div>
 
-      <button class="btn btn-ghost" id="copy-btn" onclick="copyRoomCode()" style="margin-bottom:20px;">
-        Copy Code
+      <button class="btn btn-secondary" id="copy-btn" onclick="copyRoomCode()" style="margin-bottom:24px;">
+        Copy &amp; Share Code
       </button>
 
-      <div style="display:flex;align-items:center;justify-content:center;color:var(--text-dim);font-size:14px;">
-        <span class="spinner"></span>
+      <div class="waiting-status">
+        <span class="pulse-dot"></span>
         Waiting for opponent…
       </div>
     </div>
@@ -177,12 +161,12 @@
   </section>
 
 
-  <!-- ============================================================ -->
-  <!--  GAME SCREEN                                                  -->
-  <!-- ============================================================ -->
+  <!-- ================================================================ -->
+  <!--  GAME SCREEN                                                      -->
+  <!-- ================================================================ -->
   <section id="game-screen" class="screen">
 
-    <!-- Header row -->
+    <!-- Header -->
     <div class="game-header">
       <span class="room-badge" id="room-badge"># ——</span>
       <button class="btn btn-ghost btn-sm" onclick="leaveRoom()">Leave</button>
@@ -191,7 +175,6 @@
     <!-- Players + Score -->
     <div class="players-row">
 
-      <!-- Player 1 (X) -->
       <div class="player-panel" id="p1-panel">
         <div class="player-symbol">X</div>
         <div class="player-label">
@@ -201,14 +184,12 @@
         <div class="player-score-val" id="p1-score">0</div>
       </div>
 
-      <!-- Draws / Divider -->
       <div class="score-sep">
         <div class="draws-label">Draws</div>
         <div class="draws-val" id="draws-score">0</div>
         <div class="score-vs">VS</div>
       </div>
 
-      <!-- Player 2 (O) -->
       <div class="player-panel" id="p2-panel">
         <div class="player-symbol">O</div>
         <div class="player-label">
@@ -224,63 +205,50 @@
     <div class="board-wrapper">
       <div id="board"></div>
 
-      <!-- Result Overlay (shown over the board) -->
+      <!-- Result Overlay -->
       <div id="result-overlay">
         <div class="result-title" id="result-title">—</div>
         <div id="result-sub"></div>
         <div id="restart-status" class="restart-status-text"></div>
-        <button class="btn btn-primary btn-sm" id="restart-btn" onclick="requestRestart()" style="width:140px;">
+        <button class="btn btn-primary btn-sm" id="restart-btn" onclick="requestRestart()" style="width:150px;">
           Play Again
         </button>
       </div>
     </div>
 
-    <!-- Turn Timer -->
-    <div id="turn-timer" class="turn-timer" style="display:none;"></div>
-
-    <!-- Status -->
-    <p id="status-msg" class="status-msg"></p>
+    <!-- Status + Timer row -->
+    <div class="status-row">
+      <p id="status-msg" class="status-msg"></p>
+      <div id="turn-timer" class="turn-timer" style="display:none;"></div>
+    </div>
 
     <!-- Voice Chat Bar -->
     <div class="voice-bar" id="voice-bar">
       <div class="voice-info">
         <span class="voice-dot" id="voice-dot"></span>
-        <span id="voice-status-text">Voice Chat</span>
+        <span id="voice-status-text">Voice</span>
       </div>
       <div class="voice-actions">
-        <button class="btn btn-ghost btn-sm" id="mute-btn" onclick="toggleMute()" style="display:none;">
-          Mute
-        </button>
-        <button class="btn btn-ghost btn-sm" id="voice-btn" onclick="toggleVoiceChat()">
-          Join Voice
-        </button>
+        <button class="btn btn-ghost btn-sm" id="mute-btn" onclick="toggleMute()" style="display:none;">Mute</button>
+        <button class="btn btn-ghost btn-sm" id="voice-btn" onclick="toggleVoiceChat()">Join Voice</button>
       </div>
     </div>
 
     <!-- Controls -->
-    <div class="game-controls" style="margin-top:8px;">
+    <div class="game-controls">
       <button class="btn btn-ghost" onclick="requestRestart()">Restart</button>
       <button class="btn btn-ghost" onclick="leaveRoom()">Leave Room</button>
     </div>
 
   </section>
 
-  <!-- Hidden audio element for remote stream -->
   <audio id="remote-audio" autoplay playsinline></audio>
 
-</div><!-- /#app -->
+</div>
 
-<!-- ================================================================ -->
-<!--  FIREBASE SDK                                                     -->
-<!--  Using Firebase v8 compat CDN (easiest setup for beginners)      -->
-<!-- ================================================================ -->
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
-
-<!-- Your Firebase config (edit values in firebase-config.js) -->
 <script src="firebase-config.js"></script>
-
-<!-- Game Logic -->
 <script src="game.js"></script>
 
 </body>

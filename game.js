@@ -905,9 +905,12 @@ function listenToAvailableRooms() {
       item.innerHTML = `
         <div class="room-item-info">
           <span class="room-item-host">${escapeHtml(host)}'s Room</span>
-          <span class="room-item-code"># ${id}</span>
+          <div class="room-item-meta">
+            <span class="room-item-code"># ${id}</span>
+            <span class="room-status-badge waiting">Open</span>
+          </div>
         </div>
-        <button class="btn btn-secondary" onclick="quickJoin('${id}')">Join</button>
+        <button class="btn btn-secondary btn-sm" onclick="quickJoin('${id}')">Join</button>
       `;
       list.appendChild(item);
     });
@@ -917,7 +920,10 @@ function listenToAvailableRooms() {
       item.innerHTML = `
         <div class="room-item-info">
           <span class="room-item-host">${escapeHtml(p1)} vs ${escapeHtml(p2)}</span>
-          <span class="room-item-code"># ${id} · In Progress</span>
+          <div class="room-item-meta">
+            <span class="room-item-code"># ${id}</span>
+            <span class="room-status-badge live">Live</span>
+          </div>
         </div>
         <button class="btn btn-ghost btn-sm" onclick="quickWatch('${id}')">Watch</button>
       `;
@@ -1092,6 +1098,26 @@ function onExitGame()   { const name = $('player-name-input').value.trim(); if (
 
 // Init lobby on load
 initLobby();
+
+// ─── CODE PANEL TOGGLE ────────────────────────────────────────────────────
+function toggleCodePanel() {
+  const panel = $('code-panel');
+  const btn   = $('code-toggle-btn');
+  const isOpen = panel.classList.toggle('open');
+  btn.classList.toggle('open', isOpen);
+  btn.textContent = isOpen ? 'Close ×' : 'Have a code? →';
+  if (isOpen) setTimeout(() => $('room-id-input')?.focus(), 310);
+}
+
+// Auto-open the code panel when shakeInput targets room-id-input
+const _origShakeInput = shakeInput;
+function shakeInput(id) {
+  if (id === 'room-id-input') {
+    const panel = $('code-panel');
+    if (!panel.classList.contains('open')) toggleCodePanel();
+  }
+  _origShakeInput(id);
+}
 
 // ─── INPUT FORMATTING ─────────────────────────────────────────────────────
 $('room-id-input').addEventListener('input', function() {
