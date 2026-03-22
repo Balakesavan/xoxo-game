@@ -1024,6 +1024,10 @@ listenToAvailableRooms();
 let lobbyUserId   = null;   // unique key for this browser session
 let lobbyUserName = '';
 
+// Challenge state (declared here so initLobby can reference them)
+let pendingChallenge  = null;
+let incomingChallenge = null;
+
 const CHAT_INACTIVE_MS = 5 * 60 * 1000;  // 5 minutes
 const ROOM_INACTIVE_MS = 5 * 60 * 1000;  // 5 minutes
 
@@ -1048,14 +1052,23 @@ function initLobby() {
   // Listen to online users
   db.ref('lobby/online').on('value', snap => {
     const data = snap.val() || {};
-    const users = Object.values(data).filter(u => u && u.name);
+    const users = Object.entries(data).filter(([, u]) => u && u.name);
     $('online-num').textContent = users.length;
 
     const list = $('online-list');
     list.innerHTML = '';
-    users.forEach(u => {
+    users.forEach(([key, u]) => {
+      const uid  = u.userId || key;
+      const isMe = uid === lobbyUserId;
       const chip = el('div', 'online-user-chip');
-      chip.innerHTML = `<span class="dot"></span>${escapeHtml(u.name)}`;
+      chip.innerHTML = `<span class="dot"></span><span class="chip-name">${escapeHtml(u.name)}</span>`;
+      if (!isMe && !pendingChallenge && !state.roomId) {
+        const btn = document.createElement('button');
+        btn.className   = 'challenge-chip-btn';
+        btn.textContent = 'Challenge';
+        btn.onclick     = () => sendChallenge(uid, u.name);
+        chip.appendChild(btn);
+      }
       list.appendChild(chip);
     });
   });
@@ -1065,6 +1078,21 @@ function initLobby() {
     const msg = snap.val();
     if (!msg) return;
     appendChatMessage(msg);
+  });
+
+  // Listen for incoming challenges
+  db.ref(`lobby/challenges/${lobbyUserId}`).on('value', snap => {
+    const challenge = snap.val();
+    if (challenge && !incomingChallenge && !state.roomId) {
+      incomingChallenge = {
+        ...challenge,
+        ref: db.ref(`lobby/challenges/${lobbyUserId}`),
+      };
+      showChallengeModal(challenge.fromName);
+    } else if (!challenge && incomingChallenge) {
+      // Challenger cancelled
+      hideChallengeModal();
+    }
   });
 
   // Chat input — send on Enter
@@ -1079,7 +1107,7 @@ function setLobbyPresence(name) {
   lobbyUserName = name;
 
   const ref = db.ref(`lobby/online/${lobbyUserId}`);
-  ref.set({ name });
+  ref.set({ name, userId: lobbyUserId });
   ref.onDisconnect().remove();
 }
 
@@ -1142,6 +1170,7 @@ function onExitGame()   { const name = $('player-name-input').value.trim(); if (
 
 // Init lobby on load
 initLobby();
+initLaunchScreen();
 
 // ─── CODE PANEL TOGGLE ────────────────────────────────────────────────────
 function toggleCodePanel() {
@@ -1167,3 +1196,218 @@ function shakeInput(id) {
 $('room-id-input').addEventListener('input', function() {
   this.value = this.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
 });
+
+// ─── LAUNCH SCREEN ────────────────────────────────────────────────────────
+const SAVED_NAME_KEY = 'xoxo_player_name';
+
+function initLaunchScreen() {
+  const launch = $('launch-screen');
+
+  function proceedFromLaunch() {
+    const savedName = localStorage.getItem(SAVED_NAME_KEY);
+    if (savedName) {
+      $('player-name-input').value = savedName;
+      setLobbyPresence(savedName);
+      showScreen('lobby-screen');
+    } else {
+      showScreen('login-screen');
+      setTimeout(() => $('login-name-input') && $('login-name-input').focus(), 350);
+    }
+  }
+
+  // Auto-transition after 2.2 seconds
+  const autoTimer = setTimeout(proceedFromLaunch, 2200);
+
+  // Tap anywhere to skip
+  launch.addEventListener('click', () => {
+    clearTimeout(autoTimer);
+    proceedFromLaunch();
+  });
+
+  // Enter key on login
+  $('login-name-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') doLogin();
+  });
+}
+
+// ─── LOGIN ────────────────────────────────────────────────────────────────
+function doLogin() {
+  SFX.click();
+  const input = $('login-name-input');
+  const name = input.value.trim();
+  if (!name) { shakeInput('login-name-input'); return; }
+
+  localStorage.setItem(SAVED_NAME_KEY, name);
+  $('player-name-input').value = name;
+  setLobbyPresence(name);
+  showScreen('lobby-screen');
+}
+
+// ─── CHALLENGE SYSTEM ────────────────────────────────────────────────────
+// pendingChallenge: challenger is waiting for the target to accept
+// incomingChallenge: this player received a challenge from someone
+
+async function sendChallenge(targetId, targetName) {
+  SFX.click();
+  if (pendingChallenge) return; // already waiting on one
+  const myName = $('player-name-input').value.trim();
+  if (!myName) { setStatus('Enter your name first!', 'error'); return; }
+
+  // Create the room (challenger is player1)
+  const roomId  = genRoomId();
+  const roomRef = db.ref('rooms/' + roomId);
+
+  const initialData = {
+    board:         Array(9).fill(''),
+    turn:          'player1',
+    status:        'waiting',
+    winner:        null,
+    winLine:       null,
+    scores:        { player1: 0, player2: 0, draws: 0 },
+    player1:       { name: myName, online: true },
+    player2:       null,
+    restartVote:   null,
+    turnStartedAt: firebase.database.ServerValue.TIMESTAMP,
+    createdAt:     firebase.database.ServerValue.TIMESTAMP,
+    lastActivity:  firebase.database.ServerValue.TIMESTAMP,
+  };
+
+  try {
+    await withTimeout(roomRef.set(initialData));
+    roomRef.onDisconnect().remove();
+
+    const challengeRef = db.ref(`lobby/challenges/${targetId}`);
+    await withTimeout(challengeRef.set({
+      fromId:    lobbyUserId,
+      fromName:  myName,
+      roomId,
+      timestamp: firebase.database.ServerValue.TIMESTAMP,
+    }));
+    challengeRef.onDisconnect().remove();
+
+    // Show the pending bar
+    $('challenge-pending-name').textContent = targetName;
+    $('challenge-pending').classList.remove('hidden');
+
+    // Set up game state so listenToRoom works when accepted
+    state.roomId     = roomId;
+    state.playerId   = 'player1';
+    state.playerName = myName;
+    state.roomRef    = roomRef;
+
+    // Watch room — status 'playing' means accepted, null means declined/cancelled
+    const watcher = roomRef.on('value', snap => {
+      const data = snap.val();
+      if (!data) {
+        // Room deleted → declined or expired
+        roomRef.off('value', watcher);
+        const tName = pendingChallenge ? pendingChallenge.targetName : targetName;
+        _clearPendingChallenge();
+        setStatus(`${tName} declined your challenge.`, 'error');
+      } else if (data.status === 'playing') {
+        // Accepted!
+        roomRef.off('value', watcher);
+        _clearPendingChallenge();
+        onEnterGame();
+        listenToRoom();
+      }
+    });
+
+    pendingChallenge = {
+      targetId, targetName, roomId, roomRef, challengeRef,
+      watcher,
+      timeoutId: setTimeout(() => cancelChallenge(), 30000),
+    };
+
+  } catch (err) {
+    console.error(err);
+    setStatus('Failed to send challenge.', 'error');
+    resetState();
+  }
+}
+
+async function cancelChallenge() {
+  if (!pendingChallenge) return;
+  SFX.click();
+  const { roomRef, challengeRef, watcher, timeoutId } = pendingChallenge;
+  clearTimeout(timeoutId);
+  if (watcher && roomRef) roomRef.off('value', watcher);
+  _clearPendingChallenge();
+  await Promise.all([
+    roomRef?.remove().catch(() => {}),
+    challengeRef?.remove().catch(() => {}),
+  ]);
+  resetState();
+}
+
+function _clearPendingChallenge() {
+  pendingChallenge = null;
+  $('challenge-pending').classList.add('hidden');
+}
+
+// ─── INCOMING CHALLENGE (target side) ────────────────────────────────────
+function showChallengeModal(fromName) {
+  $('challenge-modal-from').textContent = fromName;
+  $('challenge-modal').classList.remove('hidden');
+}
+
+function hideChallengeModal() {
+  $('challenge-modal').classList.add('hidden');
+  incomingChallenge = null;
+}
+
+async function acceptChallenge() {
+  if (!incomingChallenge) return;
+  SFX.click();
+  const { fromName, roomId, ref } = incomingChallenge;
+  const myName = $('player-name-input').value.trim() || localStorage.getItem(SAVED_NAME_KEY) || 'Player';
+
+  hideChallengeModal();
+
+  const roomRef = db.ref('rooms/' + roomId);
+  try {
+    const snap = await withTimeout(roomRef.once('value'));
+    const data  = snap.val();
+    if (!data || data.status !== 'waiting') {
+      setStatus('Challenge expired.', 'error');
+      return;
+    }
+
+    await withTimeout(roomRef.update({
+      player2:      { name: myName, online: true },
+      status:       'playing',
+      lastActivity: firebase.database.ServerValue.TIMESTAMP,
+    }));
+
+    roomRef.onDisconnect().cancel();
+    roomRef.child('player1/online').onDisconnect().set(false);
+    roomRef.child('player2/online').onDisconnect().set(false);
+
+    await ref.remove().catch(() => {});
+
+    state.roomId     = roomId;
+    state.playerId   = 'player2';
+    state.playerName = myName;
+    state.roomRef    = roomRef;
+
+    SFX.join();
+    onEnterGame();
+    listenToRoom();
+
+  } catch (err) {
+    console.error(err);
+    setStatus('Failed to join challenge.', 'error');
+  }
+}
+
+async function declineChallenge() {
+  if (!incomingChallenge) return;
+  SFX.click();
+  const { roomId, ref } = incomingChallenge;
+  hideChallengeModal();
+  // Delete challenge + room so challenger's watcher fires with null
+  await Promise.all([
+    ref.remove().catch(() => {}),
+    db.ref('rooms/' + roomId).remove().catch(() => {}),
+  ]);
+}

@@ -35,9 +35,58 @@
 <div id="app">
 
   <!-- ================================================================ -->
+  <!--  LAUNCH SCREEN                                                    -->
+  <!-- ================================================================ -->
+  <section id="launch-screen" class="screen active launch-screen">
+    <div class="launch-inner">
+      <div class="logo launch-logo">
+        <div class="logo-mark">
+          <span class="logo-x">X</span>
+          <span class="logo-sep">×</span>
+          <span class="logo-o">O</span>
+        </div>
+        <div class="logo-tagline">Real-time Multiplayer</div>
+      </div>
+      <div class="launch-subtitle">Challenge friends. Claim glory.</div>
+      <div class="launch-tap">Tap anywhere to continue</div>
+    </div>
+  </section>
+
+  <!-- ================================================================ -->
+  <!--  LOGIN SCREEN                                                     -->
+  <!-- ================================================================ -->
+  <section id="login-screen" class="screen">
+    <div class="logo" style="margin-bottom:32px">
+      <div class="logo-mark">
+        <span class="logo-x">X</span>
+        <span class="logo-sep">×</span>
+        <span class="logo-o">O</span>
+      </div>
+      <div class="logo-tagline">Real-time Multiplayer</div>
+    </div>
+    <div class="card login-card">
+      <div class="login-headline">What's your name?</div>
+      <p class="login-sub">Pick a name to start playing and challenging others</p>
+      <input
+        type="text"
+        id="login-name-input"
+        class="name-input"
+        placeholder="Enter your name…"
+        maxlength="18"
+        autocomplete="off"
+        spellcheck="false"
+      />
+      <button class="btn btn-primary" id="login-btn" onclick="doLogin()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>
+        Let's Play!
+      </button>
+    </div>
+  </section>
+
+  <!-- ================================================================ -->
   <!--  LOBBY SCREEN                                                     -->
   <!-- ================================================================ -->
-  <section id="lobby-screen" class="screen active">
+  <section id="lobby-screen" class="screen">
 
     <!-- Logo -->
     <div class="logo">
@@ -47,6 +96,13 @@
         <span class="logo-o">O</span>
       </div>
       <div class="logo-tagline">Real-time Multiplayer</div>
+    </div>
+
+    <!-- Challenge Pending Bar (shown when waiting for opponent to accept) -->
+    <div id="challenge-pending" class="challenge-pending hidden">
+      <span class="pulse-dot"></span>
+      <span>Waiting for <strong id="challenge-pending-name">—</strong> to accept…</span>
+      <button class="btn btn-ghost btn-sm" onclick="cancelChallenge()">Cancel</button>
     </div>
 
     <!-- Name + Create -->
@@ -257,6 +313,19 @@
   </section>
 
   <audio id="remote-audio" autoplay playsinline></audio>
+
+  <!-- Challenge Request Modal -->
+  <div id="challenge-modal" class="challenge-modal hidden" aria-live="polite">
+    <div class="challenge-modal-inner">
+      <div class="challenge-modal-icon">⚡</div>
+      <div class="challenge-modal-from" id="challenge-modal-from">Player</div>
+      <div class="challenge-modal-msg">wants to play!</div>
+      <div class="challenge-modal-actions">
+        <button class="btn btn-primary btn-sm" onclick="acceptChallenge()">Accept</button>
+        <button class="btn btn-ghost btn-sm" onclick="declineChallenge()">Decline</button>
+      </div>
+    </div>
+  </div>
 
 </div>
 
