@@ -287,7 +287,10 @@ function renderGame(data) {
   $('p1-panel').classList.toggle('active-player', turn === 'player1' && status === 'playing');
   $('p2-panel').classList.toggle('active-player', turn === 'player2' && status === 'playing');
   const vsEl = document.querySelector('.score-vs');
-  if (vsEl) vsEl.textContent = status === 'playing' ? (turn === 'player1' ? '←' : '→') : 'VS';
+  if (vsEl) {
+    vsEl.textContent = status === 'playing' ? (turn === 'player1' ? '←' : '→') : 'VS';
+    vsEl.classList.toggle('arrow', status === 'playing');
+  }
 
   // YOU / WATCH badge
   [['p1-panel','player1'],['p2-panel','player2']].forEach(([id, pid]) => {
@@ -302,7 +305,10 @@ function renderGame(data) {
   });
 
   // Room badge — show spectator indicator
-  $('room-badge').textContent = (state.isSpectator ? 'WATCH ' : '# ') + state.roomId;
+  const roomBadgeCode = $('room-badge-code');
+  if (roomBadgeCode) roomBadgeCode.textContent = state.roomId;
+  const roomBadgeEl = $('room-badge');
+  if (roomBadgeEl) roomBadgeEl.classList.toggle('spectator-badge', !!state.isSpectator);
 
   // Hide voice bar and restart button for spectators
   const voiceBar = $('voice-bar');
@@ -468,20 +474,22 @@ function showResult(data, me, other) {
   const overlay       = $('result-overlay');
   const title         = $('result-title');
   const sub           = $('result-sub');
+  const emoji         = $('result-emoji');
   const restartStatus = $('restart-status');
   const restartBtn    = $('restart-btn');
 
-  // Determine result key to avoid replaying SFX on re-renders
   const resultKey = data.winner === 'draw' ? 'draw' : (data.winner === me ? 'win' : 'lose');
 
   if (resultKey !== lastResultRendered) {
     lastResultRendered = resultKey;
     if (resultKey === 'draw') {
+      if (emoji)  emoji.textContent  = '🤝';
       title.textContent = "It's a Draw!";
-      sub.textContent   = 'Well played by both sides.';
+      sub.textContent   = 'Well played by both.';
       title.className   = 'result-title draw';
       SFX.draw();
     } else if (resultKey === 'win') {
+      if (emoji)  emoji.textContent  = '🏆';
       title.textContent = 'You Win!';
       sub.textContent   = 'Outstanding move!';
       title.className   = 'result-title win';
@@ -489,7 +497,8 @@ function showResult(data, me, other) {
       launchConfetti();
     } else {
       const oppName = data[other]?.name || 'Opponent';
-      title.textContent = (state.isSpectator ? oppName : oppName) + ' Wins!';
+      if (emoji)  emoji.textContent  = state.isSpectator ? '🎮' : '😔';
+      title.textContent = oppName + ' Wins!';
       sub.textContent   = state.isSpectator ? 'Game over.' : 'Better luck next round.';
       title.className   = 'result-title lose';
       if (!state.isSpectator) SFX.lose();
