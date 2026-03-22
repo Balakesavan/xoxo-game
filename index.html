@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>XOXO — Multiplayer Tic Tac Toe</title>
+  <meta name="description" content="Real-time multiplayer Tic Tac Toe. Create or join a room and play from any device." />
+  <meta name="theme-color" content="#0f0f13" />
+
+  <!-- Open Graph -->
+  <meta property="og:title" content="XOXO — Multiplayer Tic Tac Toe" />
+  <meta property="og:description" content="Play real-time multiplayer Tic Tac Toe with anyone in the world." />
+  <meta property="og:type" content="website" />
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&display=swap" rel="stylesheet" />
+
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- Confetti Canvas (full-screen, z-index 999) -->
+<canvas id="confetti-canvas"></canvas>
+
+<!-- Connection Status -->
+<div id="connection-status">
+  <span class="conn-dot offline" id="conn-dot"></span>
+  <span id="conn-label">Offline</span>
+</div>
+
+<!-- ================================================================ -->
+<!--  APP                                                              -->
+<!-- ================================================================ -->
+<div id="app">
+
+  <!-- ============================================================ -->
+  <!--  LOBBY SCREEN                                                 -->
+  <!-- ============================================================ -->
+  <section id="lobby-screen" class="screen active">
+
+    <!-- Logo -->
+    <div class="logo">
+      <div class="logo-mark">
+        <span class="logo-x">X</span>
+        <span class="logo-sep">·</span>
+        <span class="logo-o">O</span>
+        <span class="logo-sep">·</span>
+        <span class="logo-x">X</span>
+        <span class="logo-sep">·</span>
+        <span class="logo-o">O</span>
+      </div>
+      <div class="logo-sub">Multiplayer</div>
+    </div>
+
+    <!-- Player Name -->
+    <div class="card" style="margin-bottom:0">
+      <div class="card-title">Your Name</div>
+      <div class="input-group">
+        <input
+          type="text"
+          id="player-name-input"
+          placeholder="Enter your name…"
+          maxlength="18"
+          autocomplete="off"
+          spellcheck="false"
+        />
+      </div>
+    </div>
+
+    <!-- Create -->
+    <div class="card">
+      <div class="card-title">New Game</div>
+      <p style="font-size:13px;color:var(--text-dim);margin-bottom:16px;line-height:1.6;">
+        Create a private room and share the code with a friend.
+      </p>
+      <button class="btn btn-primary" id="create-btn" onclick="createRoom()">
+        Create Room
+      </button>
+    </div>
+
+    <!-- Divider -->
+    <div class="divider" style="width:100%;max-width:480px;">or</div>
+
+    <!-- Join -->
+    <div class="card">
+      <div class="card-title">Join Game</div>
+      <div class="input-group">
+        <label for="room-id-input">Room Code</label>
+        <input
+          type="text"
+          id="room-id-input"
+          placeholder="A B C 1 2 3"
+          maxlength="6"
+          autocomplete="off"
+          spellcheck="false"
+        />
+      </div>
+      <button class="btn btn-secondary" id="join-btn" onclick="joinRoom()">
+        Join Room
+      </button>
+    </div>
+
+    <p id="status-msg" class="status-msg"></p>
+
+  </section>
+
+
+  <!-- ============================================================ -->
+  <!--  WAITING SCREEN                                               -->
+  <!-- ============================================================ -->
+  <section id="waiting-screen" class="screen">
+
+    <div class="logo" style="margin-bottom:24px">
+      <div class="logo-mark">
+        <span class="logo-x">X</span>
+        <span class="logo-sep">·</span>
+        <span class="logo-o">O</span>
+      </div>
+    </div>
+
+    <div class="card waiting-card">
+      <div class="waiting-title">Room Created!</div>
+      <p class="waiting-sub">Share this code with your opponent</p>
+
+      <div class="room-code-block">
+        <div class="room-code-label">Room Code</div>
+        <div id="room-code-display">——</div>
+      </div>
+
+      <button class="btn btn-ghost" id="copy-btn" onclick="copyRoomCode()" style="margin-bottom:20px;">
+        Copy Code
+      </button>
+
+      <div style="display:flex;align-items:center;justify-content:center;color:var(--text-dim);font-size:14px;">
+        <span class="spinner"></span>
+        Waiting for opponent…
+      </div>
+    </div>
+
+    <button class="btn btn-ghost" onclick="leaveRoom()" style="margin-top:16px;max-width:480px;">
+      ← Cancel &amp; Leave
+    </button>
+
+  </section>
+
+
+  <!-- ============================================================ -->
+  <!--  GAME SCREEN                                                  -->
+  <!-- ============================================================ -->
+  <section id="game-screen" class="screen">
+
+    <!-- Header row -->
+    <div class="game-header">
+      <span class="room-badge" id="room-badge"># ——</span>
+      <button class="btn btn-ghost btn-sm" onclick="leaveRoom()">Leave</button>
+    </div>
+
+    <!-- Players + Score -->
+    <div class="players-row">
+
+      <!-- Player 1 (X) -->
+      <div class="player-panel" id="p1-panel">
+        <div class="player-symbol">X</div>
+        <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px;">
+          <span class="player-online off" id="p1-online"></span>Player 1
+        </div>
+        <div class="player-name-display" id="p1-name">—</div>
+        <div class="player-score-val" id="p1-score">0</div>
+      </div>
+
+      <!-- Draws / Divider -->
+      <div class="score-sep">
+        <div class="draws-label">Draws</div>
+        <div class="draws-val" id="draws-score">0</div>
+        <div class="score-dash">—</div>
+      </div>
+
+      <!-- Player 2 (O) -->
+      <div class="player-panel" id="p2-panel">
+        <div class="player-symbol">O</div>
+        <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px;">
+          <span class="player-online off" id="p2-online"></span>Player 2
+        </div>
+        <div class="player-name-display" id="p2-name">—</div>
+        <div class="player-score-val" id="p2-score">0</div>
+      </div>
+
+    </div>
+
+    <!-- Board -->
+    <div class="board-wrapper">
+      <div id="board"></div>
+
+      <!-- Result Overlay (shown over the board) -->
+      <div id="result-overlay">
+        <div class="result-title" id="result-title">—</div>
+        <div id="result-sub"></div>
+        <button class="btn btn-primary btn-sm" onclick="requestRestart()" style="width:140px;">
+          Play Again
+        </button>
+      </div>
+    </div>
+
+    <!-- Status -->
+    <p id="status-msg" class="status-msg"></p>
+
+    <!-- Controls -->
+    <div class="game-controls" style="margin-top:8px;">
+      <button class="btn btn-ghost" onclick="requestRestart()">Restart</button>
+      <button class="btn btn-ghost" onclick="leaveRoom()">Leave Room</button>
+    </div>
+
+  </section>
+
+</div><!-- /#app -->
+
+<!-- ================================================================ -->
+<!--  FIREBASE SDK                                                     -->
+<!--  Using Firebase v8 compat CDN (easiest setup for beginners)      -->
+<!-- ================================================================ -->
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+
+<!-- Your Firebase config (edit values in firebase-config.js) -->
+<script src="firebase-config.js"></script>
+
+<!-- Game Logic -->
+<script src="game.js"></script>
+
+</body>
+</html>
