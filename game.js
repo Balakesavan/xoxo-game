@@ -307,6 +307,18 @@ function renderGame(data) {
   // Hide voice bar and restart button for spectators
   const voiceBar = $('voice-bar');
   if (voiceBar) voiceBar.style.display = state.isSpectator ? 'none' : '';
+
+  // Show when opponent has joined voice but you haven't yet
+  if (!state.isSpectator && !voiceActive && me) {
+    const theirPresence = data.voice?.[`present_${other}`];
+    const oppName = data[other]?.name || 'Opponent';
+    if (theirPresence) {
+      setVoiceText(oppName + ' is in voice!');
+      setVoiceDot('connecting');
+    } else if ($('voice-status-text')?.textContent === oppName + ' is in voice!') {
+      setVoiceText('Voice'); setVoiceDot('');
+    }
+  }
   const ctrlRestart = document.querySelector('.game-controls .btn:first-child');
   if (ctrlRestart) ctrlRestart.style.display = state.isSpectator ? 'none' : '';
 
@@ -703,6 +715,8 @@ document.addEventListener('keydown', e => {
 });
 
 // ─── VOICE CHAT (WebRTC + Firebase Signaling) ─────────────────────────────
+// NOTE: Only STUN servers are configured. Voice may fail between players on
+// different NAT types (corporate / mobile). Add a TURN server for production.
 const RTC_CONFIG = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
@@ -714,6 +728,18 @@ let localStream    = null;
 let peerConn       = null;
 let isMuted        = false;
 let voiceActive    = false;
+let voiceListeners = []; // tracked Firebase listeners so we can detach them
+
+// Register a Firebase listener and remember it for cleanup
+function addVoiceListener(ref, type, handler) {
+  ref.on(type, handler);
+  voiceListeners.push({ ref, type, handler });
+}
+
+function detachVoiceListeners() {
+  voiceListeners.forEach(({ ref, type, handler }) => ref.off(type, handler));
+  voiceListeners = [];
+}
 
 async function toggleVoiceChat() {
   if (voiceActive) {
@@ -729,78 +755,75 @@ async function startVoiceChat() {
     setVoiceText('Requesting mic…');
 
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      throw new Error('Mic not supported — use Chrome/Firefox on localhost or HTTPS');
+      throw new Error('Mic not supported — use HTTPS or localhost');
     }
 
     localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
     voiceActive = true;
     updateVoiceUI();
 
+    // Announce presence so the other player knows you joined voice
+    if (state.roomRef && state.playerId) {
+      state.roomRef.child(`voice/present_${state.playerId}`).set(true);
+      state.roomRef.child(`voice/present_${state.playerId}`).onDisconnect().remove();
+    }
+
     peerConn = new RTCPeerConnection(RTC_CONFIG);
 
-    // Add local audio tracks
     localStream.getTracks().forEach(t => peerConn.addTrack(t, localStream));
 
-    // Play remote audio when received
-    peerConn.ontrack = e => {
-      $('remote-audio').srcObject = e.streams[0];
-    };
+    peerConn.ontrack = e => { $('remote-audio').srcObject = e.streams[0]; };
 
-    // Send ICE candidates to Firebase
     peerConn.onicecandidate = async e => {
-      if (e.candidate) {
-        await state.roomRef.child(`voice/ice_${state.playerId}`).push(e.candidate.toJSON());
-      }
+      if (e.candidate && state.roomRef)
+        await state.roomRef.child(`voice/ice_${state.playerId}`).push(e.candidate.toJSON()).catch(() => {});
     };
 
     peerConn.onconnectionstatechange = () => {
       const s = peerConn.connectionState;
       if (s === 'connected')    { setVoiceDot('connected');  setVoiceText('Connected'); }
       if (s === 'connecting')   { setVoiceDot('connecting'); setVoiceText('Connecting…'); }
-      if (s === 'disconnected') { setVoiceDot('');           setVoiceText('Peer disconnected'); }
-      if (s === 'failed')       { stopVoiceChat(); setVoiceText('Connection failed'); }
+      if (s === 'disconnected') { setVoiceDot('connecting'); setVoiceText('Reconnecting…'); }
+      if (s === 'failed')       { stopVoiceChat(); setVoiceText('Call failed — try again'); }
     };
 
     if (state.playerId === 'player1') {
-      // Host creates the offer
       const offer = await peerConn.createOffer();
       await peerConn.setLocalDescription(offer);
       await state.roomRef.child('voice/offer').set({ type: offer.type, sdp: offer.sdp });
 
-      // Wait for answer from player2
-      state.roomRef.child('voice/answer').on('value', async snap => {
-        if (snap.val() && peerConn && peerConn.signalingState === 'have-local-offer') {
-          await peerConn.setRemoteDescription(new RTCSessionDescription(snap.val()));
-        }
+      addVoiceListener(state.roomRef.child('voice/answer'), 'value', async snap => {
+        if (snap.val() && peerConn && peerConn.signalingState === 'have-local-offer')
+          await peerConn.setRemoteDescription(new RTCSessionDescription(snap.val())).catch(console.error);
       });
 
-      // Receive ICE from player2
-      state.roomRef.child('voice/ice_player2').on('child_added', async snap => {
-        if (snap.val() && peerConn) await peerConn.addIceCandidate(new RTCIceCandidate(snap.val()));
+      addVoiceListener(state.roomRef.child('voice/ice_player2'), 'child_added', async snap => {
+        if (snap.val() && peerConn)
+          await peerConn.addIceCandidate(new RTCIceCandidate(snap.val())).catch(console.error);
       });
 
     } else {
-      // Guest waits for offer then answers
       setVoiceText('Waiting for host…');
-      state.roomRef.child('voice/offer').on('value', async snap => {
+
+      addVoiceListener(state.roomRef.child('voice/offer'), 'value', async snap => {
         if (!snap.val() || !peerConn || peerConn.signalingState !== 'stable') return;
-        await peerConn.setRemoteDescription(new RTCSessionDescription(snap.val()));
+        await peerConn.setRemoteDescription(new RTCSessionDescription(snap.val())).catch(console.error);
         const answer = await peerConn.createAnswer();
         await peerConn.setLocalDescription(answer);
-        await state.roomRef.child('voice/answer').set({ type: answer.type, sdp: answer.sdp });
+        await state.roomRef.child('voice/answer').set({ type: answer.type, sdp: answer.sdp }).catch(console.error);
       });
 
-      // Receive ICE from player1
-      state.roomRef.child('voice/ice_player1').on('child_added', async snap => {
-        if (snap.val() && peerConn) await peerConn.addIceCandidate(new RTCIceCandidate(snap.val()));
+      addVoiceListener(state.roomRef.child('voice/ice_player1'), 'child_added', async snap => {
+        if (snap.val() && peerConn)
+          await peerConn.addIceCandidate(new RTCIceCandidate(snap.val())).catch(console.error);
       });
     }
 
   } catch (err) {
     console.error('Voice chat error:', err);
     const msg = err.name === 'NotAllowedError'
-      ? 'Mic access denied — allow mic in browser'
-      : (err.message || err.name || 'Voice chat failed');
+      ? 'Mic access denied — check browser permissions'
+      : (err.message || err.name || 'Voice failed');
     setVoiceText(msg);
     setVoiceDot('');
     stopVoiceChat(true);
@@ -808,19 +831,31 @@ async function startVoiceChat() {
 }
 
 function stopVoiceChat(keepUI = false) {
-  if (localStream)  { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
-  if (peerConn)     { peerConn.close(); peerConn = null; }
+  detachVoiceListeners();
+  if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
+  if (peerConn)    { peerConn.close(); peerConn = null; }
   voiceActive = false;
-  isMuted = false;
+  isMuted     = false;
 
-  // Clean up Firebase signaling data
-  if (state.roomRef) state.roomRef.child('voice').remove().catch(() => {});
+  // Only clean up THIS player's signaling data — don't touch the other player's
+  if (state.roomRef && state.playerId) {
+    const pid = state.playerId;
+    state.roomRef.child(`voice/ice_${pid}`).remove().catch(() => {});
+    state.roomRef.child(`voice/present_${pid}`).remove().catch(() => {});
+    if (pid === 'player1') {
+      // Player1 owns the offer/answer exchange
+      state.roomRef.child('voice/offer').remove().catch(() => {});
+      state.roomRef.child('voice/answer').remove().catch(() => {});
+    }
+  }
 
   if (!keepUI) {
     setVoiceDot('');
-    setVoiceText('Voice Chat');
-    $('voice-btn').textContent = 'Join Voice';
-    $('mute-btn').style.display = 'none';
+    setVoiceText('Voice');
+    const btn = $('voice-btn');
+    if (btn) btn.textContent = 'Join Voice';
+    const muteBtn = $('mute-btn');
+    if (muteBtn) muteBtn.style.display = 'none';
   }
 }
 
