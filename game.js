@@ -126,15 +126,16 @@ async function createRoom() {
   const roomRef = db.ref('rooms/' + roomId);
 
   const initialData = {
-    board:    Array(9).fill(''),
-    turn:     'player1',
-    status:   'waiting',   // waiting | playing | finished
-    winner:   null,
-    winLine:  null,
-    scores:   { player1: 0, player2: 0, draws: 0 },
-    player1:  { name, online: true },
-    player2:  null,
-    createdAt: firebase.database.ServerValue.TIMESTAMP,
+    board:      Array(9).fill(''),
+    turn:       'player1',
+    status:     'waiting',
+    winner:     null,
+    winLine:    null,
+    scores:     { player1: 0, player2: 0, draws: 0 },
+    player1:    { name, online: true },
+    player2:    null,
+    createdAt:  firebase.database.ServerValue.TIMESTAMP,
+    lastActivity: firebase.database.ServerValue.TIMESTAMP,
   };
 
   try {
@@ -358,7 +359,7 @@ async function makeMove(index) {
 
   const nextTurn = state.playerId === 'player1' ? 'player2' : 'player1';
 
-  const updates = { board: newBoard };
+  const updates = { board: newBoard, lastActivity: firebase.database.ServerValue.TIMESTAMP };
 
   if (winner) {
     updates.status  = 'finished';
@@ -427,11 +428,12 @@ async function requestRestart() {
   if (!state.roomRef || !state.gameData) return;
 
   await state.roomRef.update({
-    board:   Array(9).fill(''),
-    turn:    'player1',
-    status:  'playing',
-    winner:  null,
-    winLine: null,
+    board:        Array(9).fill(''),
+    turn:         'player1',
+    status:       'playing',
+    winner:       null,
+    winLine:      null,
+    lastActivity: firebase.database.ServerValue.TIMESTAMP,
   });
 
   prevBoard = Array(9).fill(null);
@@ -727,9 +729,20 @@ function listenToAvailableRooms() {
 
     if (!list) return;
 
+    const now = Date.now();
     const openRooms = [];
+
     Object.entries(data).forEach(([id, room]) => {
-      if (room && room.status === 'waiting' && room.player1 && room.player1.name) {
+      if (!room) return;
+
+      // Delete rooms inactive for 5+ minutes
+      const lastActive = room.lastActivity || room.createdAt || 0;
+      if (now - lastActive >= ROOM_INACTIVE_MS) {
+        db.ref('rooms/' + id).remove().catch(() => {});
+        return;
+      }
+
+      if (room.status === 'waiting' && room.player1 && room.player1.name) {
         openRooms.push({ id, host: room.player1.name });
       }
     });
@@ -778,7 +791,8 @@ listenToAvailableRooms();
 let lobbyUserId   = null;   // unique key for this browser session
 let lobbyUserName = '';
 
-const CHAT_INACTIVE_MS = 30 * 60 * 1000; // 30 minutes
+const CHAT_INACTIVE_MS = 5 * 60 * 1000;  // 5 minutes
+const ROOM_INACTIVE_MS = 5 * 60 * 1000;  // 5 minutes
 
 async function clearChatIfInactive() {
   const snap = await db.ref('lobby/lastActivity').once('value');
