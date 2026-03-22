@@ -153,8 +153,9 @@ async function createRoom() {
   try {
     await withTimeout(roomRef.set(initialData));
 
-    // Mark host offline on disconnect
-    roomRef.child('player1/online').onDisconnect().set(false);
+    // If host disconnects while still waiting, delete the room entirely.
+    // This is cancelled and replaced when player2 joins.
+    roomRef.onDisconnect().remove();
 
     state.roomId    = roomId;
     state.playerId  = 'player1';
@@ -212,9 +213,17 @@ async function joinRoom() {
       return;
     }
 
-    await roomRef.child('player2').set({ name, online: true });
-    await roomRef.child('status').set('playing');
+    // Single atomic write — no intermediate state visible in lobby
+    await withTimeout(roomRef.update({
+      player2:      { name, online: true },
+      status:       'playing',
+      lastActivity: firebase.database.ServerValue.TIMESTAMP,
+    }));
 
+    // Cancel the whole-room delete-on-disconnect set by createRoom,
+    // then set per-player online flags instead
+    roomRef.onDisconnect().cancel();
+    roomRef.child('player1/online').onDisconnect().set(false);
     roomRef.child('player2/online').onDisconnect().set(false);
 
     state.roomId     = roomId;
@@ -539,12 +548,8 @@ async function leaveRoom() {
   if (state.unsubscribe) state.unsubscribe();
 
   if (state.roomRef && !state.isSpectator) {
-    // If host leaves, delete the room; guest just marks offline
-    if (state.playerId === 'player1') {
-      await state.roomRef.remove().catch(() => {});
-    } else {
-      await state.roomRef.child('player2/online').set(false).catch(() => {});
-    }
+    // Delete room when either player leaves — no orphaned rooms in lobby
+    await state.roomRef.remove().catch(() => {});
   }
 
   resetState();
