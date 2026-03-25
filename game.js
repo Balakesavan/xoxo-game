@@ -415,6 +415,7 @@ function renderBoard(board, turn, status, winLine, me) {
 
 // ─── MAKE MOVE ────────────────────────────────────────────────────────────
 async function makeMove(index) {
+  if (cpuGame) { makeCpuMove(index); return; }
   const data = state.gameData;
   if (!data || data.status !== 'playing') return;
   if (data.turn !== state.playerId) return;
@@ -532,6 +533,7 @@ function showResult(data, me, other) {
 
 // ─── RESTART (vote system — both players must agree) ──────────────────────
 async function requestRestart() {
+  if (cpuGame) { restartCpuGame(); return; }
   SFX.click();
   if (state.isSpectator) return;
   if (!state.roomRef || !state.gameData) return;
@@ -564,6 +566,7 @@ async function performRestart() {
 
 // ─── LEAVE ROOM ───────────────────────────────────────────────────────────
 async function leaveRoom() {
+  if (cpuGame) { leaveCpuGame(); return; }
   SFX.click();
   if (!state.isSpectator) stopVoiceChat(true);
   if (state.unsubscribe) state.unsubscribe();
@@ -1410,4 +1413,309 @@ async function declineChallenge() {
     ref.remove().catch(() => {}),
     db.ref('rooms/' + roomId).remove().catch(() => {}),
   ]);
+}
+
+// ─── PLAY VS COMPUTER ─────────────────────────────────────────────────────
+// Fully local game — no Firebase required.
+
+let cpuGame = null; // non-null when a vs-computer session is active
+
+function startCpuGame(difficulty) {
+  SFX.click();
+  const name = $('player-name-input').value.trim();
+  if (!name) { shakeInput('player-name-input'); return; }
+
+  state.playerName = name;
+  cpuGame = {
+    difficulty,
+    board: Array(9).fill(''),
+    scores: { player: 0, cpu: 0, draws: 0 },
+    status: 'playing',
+    winner: null,
+    winLine: null,
+    thinking: false,
+  };
+
+  prevBoard = Array(9).fill(null);
+  lastResultRendered = null;
+  clearInterval(timerInterval);
+
+  onEnterGame();
+  showScreen('game-screen');
+  renderCpuGame();
+  SFX.join();
+}
+
+function renderCpuGame() {
+  const g = cpuGame;
+  if (!g) return;
+
+  // Player names & scores
+  $('p1-name').textContent     = state.playerName || 'You';
+  $('p2-name').textContent     = 'Computer';
+  $('p1-score').textContent    = g.scores.player;
+  $('p2-score').textContent    = g.scores.cpu;
+  $('draws-score').textContent = g.scores.draws;
+
+  // Both always "online"
+  $('p1-online').className = 'player-online on';
+  $('p2-online').className = 'player-online on';
+
+  // Active-player highlight
+  const myTurn = g.status === 'playing' && !g.thinking;
+  $('p1-panel').classList.toggle('active-player', myTurn);
+  $('p2-panel').classList.toggle('active-player', g.thinking);
+
+  const vsEl = document.querySelector('.score-vs');
+  if (vsEl) {
+    vsEl.textContent = g.status === 'playing' ? (myTurn ? '←' : '→') : 'VS';
+    vsEl.classList.toggle('arrow', g.status === 'playing');
+  }
+
+  // YOU badge
+  ['p1-panel', 'p2-panel'].forEach((id, idx) => {
+    const panel = $(id);
+    let badge = panel.querySelector('.you-badge');
+    if (!badge) {
+      badge = document.createElement('div');
+      badge.className = 'you-badge';
+      panel.insertBefore(badge, panel.firstChild);
+    }
+    badge.textContent = idx === 0 ? 'YOU' : '';
+  });
+
+  // Room badge shows difficulty
+  const diffLabel = { easy: 'EASY', medium: 'MED', hard: 'HARD' }[g.difficulty];
+  const roomBadgeCode = $('room-badge-code');
+  if (roomBadgeCode) roomBadgeCode.textContent = diffLabel;
+  const roomBadgeEl = $('room-badge');
+  if (roomBadgeEl) roomBadgeEl.classList.remove('spectator-badge');
+
+  // Hide voice bar & turn timer
+  const voiceBar = $('voice-bar');
+  if (voiceBar) voiceBar.style.display = 'none';
+  const timerEl = $('turn-timer');
+  if (timerEl) timerEl.style.display = 'none';
+
+  // Restart control always visible for CPU mode
+  const ctrlRestart = document.querySelector('.game-controls .btn:first-child');
+  if (ctrlRestart) ctrlRestart.style.display = '';
+
+  // Board — player is always player1 (X)
+  renderBoard(g.board, myTurn ? 'player1' : 'player2', g.status, g.winLine, 'player1');
+
+  // Status text
+  if (g.status === 'playing') {
+    setStatus(g.thinking ? 'Computer is thinking…' : 'Your turn — pick a cell');
+  } else {
+    clearStatus();
+  }
+
+  // Result overlay
+  if (g.status === 'finished') {
+    showCpuResult();
+  } else {
+    $('result-overlay').classList.remove('visible');
+  }
+}
+
+function showCpuResult() {
+  const g = cpuGame;
+  const overlay       = $('result-overlay');
+  const title         = $('result-title');
+  const sub           = $('result-sub');
+  const emoji         = $('result-emoji');
+  const restartStatus = $('restart-status');
+  const restartBtn    = $('restart-btn');
+
+  const resultKey = g.winner === 'draw' ? 'draw' : (g.winner === 'player' ? 'win' : 'lose');
+
+  if (resultKey !== lastResultRendered) {
+    lastResultRendered = resultKey;
+    if (resultKey === 'draw') {
+      if (emoji) emoji.textContent = '🤝';
+      title.textContent = "It's a Draw!";
+      sub.textContent   = 'Well played!';
+      title.className   = 'result-title draw';
+      SFX.draw();
+    } else if (resultKey === 'win') {
+      if (emoji) emoji.textContent = '🏆';
+      title.textContent = 'You Win!';
+      sub.textContent   = 'Great move!';
+      title.className   = 'result-title win';
+      SFX.win();
+      launchConfetti();
+    } else {
+      if (emoji) emoji.textContent = '🤖';
+      title.textContent = 'Computer Wins!';
+      sub.textContent   = 'Better luck next round.';
+      title.className   = 'result-title lose';
+      SFX.lose();
+    }
+  }
+
+  if (restartStatus) restartStatus.textContent = '';
+  if (restartBtn)    { restartBtn.textContent = 'Play Again'; restartBtn.disabled = false; restartBtn.style.display = ''; }
+
+  overlay.classList.add('visible');
+}
+
+function restartCpuGame() {
+  if (!cpuGame) return;
+  SFX.click();
+  cpuGame.board    = Array(9).fill('');
+  cpuGame.status   = 'playing';
+  cpuGame.winner   = null;
+  cpuGame.winLine  = null;
+  cpuGame.thinking = false;
+  prevBoard = Array(9).fill(null);
+  lastResultRendered = null;
+  $('result-overlay').classList.remove('visible');
+  renderCpuGame();
+}
+
+function leaveCpuGame() {
+  SFX.click();
+  cpuGame = null;
+  prevBoard = Array(9).fill(null);
+  lastResultRendered = null;
+  clearInterval(timerInterval);
+  $('result-overlay').classList.remove('visible');
+  onExitGame();
+  showScreen('lobby-screen');
+  clearStatus();
+}
+
+// Called when the player clicks a board cell in CPU mode
+function makeCpuMove(index) {
+  const g = cpuGame;
+  if (!g || g.status !== 'playing' || g.thinking) return;
+  if (g.board[index] !== '') return;
+
+  SFX.place();
+  const newBoard = [...g.board];
+  newBoard[index] = 'X';
+  g.board = newBoard;
+
+  const { winner, winLine } = checkWinner(newBoard);
+  const isDraw = !winner && newBoard.every(c => c !== '');
+
+  if (winner) {
+    g.status = 'finished';
+    g.winner = 'player';
+    g.winLine = winLine;
+    g.scores.player++;
+    renderCpuGame();
+    return;
+  }
+  if (isDraw) {
+    g.status = 'finished';
+    g.winner = 'draw';
+    g.winLine = null;
+    g.scores.draws++;
+    renderCpuGame();
+    return;
+  }
+
+  g.thinking = true;
+  renderCpuGame();
+
+  // CPU thinks for a short delay for natural feel
+  const thinkMs = 450 + Math.floor(Math.random() * 350);
+  setTimeout(cpuTakeTurn, thinkMs);
+}
+
+function cpuTakeTurn() {
+  const g = cpuGame;
+  if (!g || g.status !== 'playing') return;
+
+  const move = getCpuMove(g.board, g.difficulty);
+  SFX.place();
+
+  const newBoard = [...g.board];
+  newBoard[move] = 'O';
+  g.board = newBoard;
+  g.thinking = false;
+
+  const { winner, winLine } = checkWinner(newBoard);
+  const isDraw = !winner && newBoard.every(c => c !== '');
+
+  if (winner) {
+    g.status = 'finished';
+    g.winner = 'cpu';
+    g.winLine = winLine;
+    g.scores.cpu++;
+  } else if (isDraw) {
+    g.status = 'finished';
+    g.winner = 'draw';
+    g.winLine = null;
+    g.scores.draws++;
+  }
+
+  renderCpuGame();
+}
+
+// ─── AI LOGIC ─────────────────────────────────────────────────────────────
+
+function getCpuMove(board, difficulty) {
+  const empty = board.reduce((acc, v, i) => { if (v === '') acc.push(i); return acc; }, []);
+
+  if (difficulty === 'easy') {
+    // Purely random
+    return empty[Math.floor(Math.random() * empty.length)];
+  }
+
+  if (difficulty === 'medium') {
+    // Win if possible, block player's win, else random
+    for (const i of empty) {
+      const b = [...board]; b[i] = 'O';
+      if (checkWinner(b).winner) return i;
+    }
+    for (const i of empty) {
+      const b = [...board]; b[i] = 'X';
+      if (checkWinner(b).winner) return i;
+    }
+    return empty[Math.floor(Math.random() * empty.length)];
+  }
+
+  // Hard: minimax — perfect play
+  return minimaxBestMove(board);
+}
+
+function minimaxBestMove(board) {
+  let best = -Infinity;
+  let bestMove = -1;
+  board.forEach((v, i) => {
+    if (v !== '') return;
+    const b = [...board]; b[i] = 'O';
+    const score = minimax(b, false);
+    if (score > best) { best = score; bestMove = i; }
+  });
+  return bestMove;
+}
+
+function minimax(board, isMaximizing) {
+  const { winner } = checkWinner(board);
+  if (winner === 'O') return 10;
+  if (winner === 'X') return -10;
+  const empty = board.filter(v => v === '');
+  if (empty.length === 0) return 0;
+
+  if (isMaximizing) {
+    let best = -Infinity;
+    board.forEach((v, i) => {
+      if (v !== '') return;
+      const b = [...board]; b[i] = 'O';
+      best = Math.max(best, minimax(b, false));
+    });
+    return best;
+  } else {
+    let best = Infinity;
+    board.forEach((v, i) => {
+      if (v !== '') return;
+      const b = [...board]; b[i] = 'X';
+      best = Math.min(best, minimax(b, true));
+    });
+    return best;
+  }
 }
